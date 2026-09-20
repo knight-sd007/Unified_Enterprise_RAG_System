@@ -193,6 +193,11 @@ def init_session_state():
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
 
+    if "selected_provider" not in st.session_state:
+        configured_p = Config.get_ai_provider().strip().lower()
+        supported = ["openai", "gemini", "nvidia_nim"]
+        st.session_state.selected_provider = configured_p if configured_p in supported else "openai"
+
     if "rag_pipeline" not in st.session_state:
         st.session_state.rag_pipeline = RAGPipeline()
 
@@ -259,6 +264,17 @@ def render_login():
         )
 
 
+def get_provider_label(provider_id: str) -> str:
+    """Returns dynamic provider display label incorporating configured chat and embedding models."""
+    if provider_id == "openai":
+        return f"OpenAI ({Config.get_openai_chat_model()} / {Config.get_openai_embedding_model()})"
+    elif provider_id == "gemini":
+        return f"Google Gemini ({Config.get_gemini_chat_model()} / {Config.get_gemini_embedding_model()})"
+    elif provider_id == "nvidia_nim":
+        return f"NVIDIA NIM ({Config.get_nvidia_chat_model()} / {Config.get_nvidia_embedding_model()})"
+    return provider_id
+
+
 def get_active_provider(provider_choice: str):
     """Instantiates active provider object based on dropdown choice."""
     if provider_choice == "openai":
@@ -270,24 +286,27 @@ def get_active_provider(provider_choice: str):
     return OpenAIProvider()
 
 
-def render_sidebar(provider):
+def render_sidebar(provider=None):
     """Renders Sidebar Controls, Provider Diagnostics, and Index Stats."""
     with st.sidebar:
         st.markdown("### ⚙️ Pipeline Control")
         st.caption("Active Provider & Vector Storage")
 
         # Provider Selector
+        options = ["openai", "gemini", "nvidia_nim"]
+        current_selection = st.session_state.get("selected_provider", "openai")
+        default_index = options.index(current_selection) if current_selection in options else 0
+
         provider_choice = st.selectbox(
             "Active AI Provider",
-            options=["openai", "gemini", "nvidia_nim"],
-            format_func=lambda x: {
-                "openai": "OpenAI (GPT-4o / text-embed-3)",
-                "gemini": "Google Gemini (Gemini 2.5 / text-embed-004)",
-                "nvidia_nim": "NVIDIA NIM (Nemotron / E5-v5)"
-            }.get(x, x),
-            index=0,
+            options=options,
+            format_func=get_provider_label,
+            index=default_index,
             help="Select the AI provider that owns both vector embedding generation and chat completions."
         )
+
+        # Update session state with active selection
+        st.session_state.selected_provider = provider_choice
 
         # Update provider if choice changed
         provider = get_active_provider(provider_choice)
@@ -395,9 +414,7 @@ def render_app():
     st.markdown(ENTERPRISE_CUSTOM_CSS, unsafe_allow_html=True)
 
     # Resolve active provider through sidebar
-    provider_default_choice = Config.get_ai_provider()
-    provider = get_active_provider(provider_default_choice)
-    provider = render_sidebar(provider)
+    provider = render_sidebar()
 
     pipeline = st.session_state.rag_pipeline
     active_p = pipeline.vector_store.get_active_provider_id()
