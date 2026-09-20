@@ -1,0 +1,48 @@
+# ==============================================================================
+# Docker Compose Manifest for Unified Enterprise RAG System (P06)
+# ==============================================================================
+
+services:
+  rag-app:
+    image: ${P06_IMAGE:-knightprime007/unified-enterprise-rag-system:latest}
+    container_name: p06_rag_system
+    restart: unless-stopped
+    ports:
+      - "${P06_HOST_PORT:-8006}:8501"
+    environment:
+      - APP_ACCESS_KEY=${APP_ACCESS_KEY:-admin123}
+      - AI_PROVIDER=${AI_PROVIDER:-gemini}
+      # Google Gemini
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_CHAT_MODEL=${GEMINI_CHAT_MODEL:-gemini-2.5-flash}
+      - GEMINI_EMBEDDING_MODEL=${GEMINI_EMBEDDING_MODEL:-text-embedding-004}
+      # NVIDIA NIM
+      - NVIDIA_API_KEY=${NVIDIA_API_KEY:-}
+      - NVIDIA_BASE_URL=${NVIDIA_BASE_URL:-https://integrate.api.nvidia.com/v1}
+      - NVIDIA_CHAT_MODEL=${NVIDIA_CHAT_MODEL:-nvidia/nemotron-3-super-120b-a12b}
+      - NVIDIA_EMBEDDING_MODEL=${NVIDIA_EMBEDDING_MODEL:-nvidia/nv-embedqa-e5-v5}
+      # OpenAI
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_CHAT_MODEL=${OPENAI_CHAT_MODEL:-gpt-4o-mini}
+      - OPENAI_EMBEDDING_MODEL=${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      # Qdrant Cloud
+      - QDRANT_URL=${QDRANT_URL:-}
+      - QDRANT_API_KEY=${QDRANT_API_KEY:-}
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+          cpus: "1.0"
+        reservations:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -2,17 +2,18 @@
 Semantic Vector Retriever calculating exact Cosine Similarity using NumPy.
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 import numpy as np
-from rag.vector_store import InMemoryVectorStore
+from rag.vector_store import InMemoryVectorStore, QdrantVectorStore
 from providers.base import BaseAIProvider
+from config.settings import Config
 from utils.logging import logger
 
 
 class SemanticRetriever:
-    """Retriever computing exact cosine similarity scores against stored vector embeddings."""
+    """Retriever computing cosine similarity against stored vectors or querying Qdrant Cloud."""
 
-    def __init__(self, vector_store: InMemoryVectorStore):
+    def __init__(self, vector_store: Union[InMemoryVectorStore, QdrantVectorStore, Any]):
         self.vector_store = vector_store
 
     @staticmethod
@@ -41,37 +42,57 @@ class SemanticRetriever:
         similarity_threshold: float = 0.25
     ) -> List[Dict[str, Any]]:
         """
-        Executes in-memory semantic vector search.
-        1. Embeds search query using active AI provider.
-        2. Validates vector dimension compatibility against store.
-        3. Computes cosine similarity against all stored document vectors.
-        4. Returns top_k records exceeding similarity threshold.
+        Executes semantic vector search against in-memory index or Qdrant Cloud.
+        1. Validates provider identity against vector store.
+        2. Embeds search query using active AI provider.
+        3. Executes search with score threshold filtering and top-K ranking.
         """
         if not query.strip():
             return []
 
-        records = self.vector_store.get_records()
-        if not records:
-            logger.info("Retrieval requested on empty vector index.")
-            return []
+        # Provider identity enforcement
+        active_p = self.vector_store.get_active_provider_id()
+        if active_p is not None and active_p != provider.provider_id:
+            raise ValueError(
+                f"Provider mismatch! Document index was generated with provider '{active_p}', "
+                f"but query was submitted with provider '{provider.provider_id}'. "
+                f"Please re-index documents or switch provider."
+            )
 
         # Generate query vector embedding via active provider
         logger.info(f"Generating query embedding via '{provider.name}' ({provider.get_embedding_model_name()})")
         query_embedding = provider.embed_query(query)
 
-        # Dimension compatibility check
-        store_dim = self.vector_store.get_embedding_dimension()
-        if store_dim is not None and len(query_embedding) != store_dim:
-            active_p = self.vector_store.get_active_provider_id()
+        # Check dimension consistency
+        spec = Config.get_provider_spec(provider.provider_id)
+        expected_dim = spec.dimension if spec else self.vector_store.get_embedding_dimension()
+        if expected_dim is not None and len(query_embedding) != expected_dim:
             raise ValueError(
-                f"Vector dimension mismatch! Document index was generated with provider '{active_p}' "
-                f"(dimension {store_dim}), but query embedding generated with '{provider.provider_id}' "
-                f"has dimension {len(query_embedding)}. Please re-index documents with current provider."
+                f"Vector dimension mismatch! Provider '{provider.provider_id}' requires dimension {expected_dim}, "
+                f"but query embedding has dimension {len(query_embedding)}."
             )
 
-        # Calculate cosine similarity against all vectors
+        # If vector store has a search method (e.g. QdrantVectorStore), delegate directly
+        if hasattr(self.vector_store, "search") and callable(getattr(self.vector_store, "search")):
+            return self.vector_store.search(
+                query_vector=query_embedding,
+                provider_id=provider.provider_id,
+                top_k=top_k,
+                similarity_threshold=similarity_threshold
+            )
+
+        # In-memory cosine similarity search
+        records = self.vector_store.get_records()
+        if not records:
+            logger.info("Retrieval requested on empty vector index.")
+            return []
+
         scored_chunks = []
         for rec in records:
+            # Enforce provider match on individual records
+            if rec.get("provider_id") and rec.get("provider_id") != provider.provider_id:
+                continue
+
             doc_embedding = rec["embedding"]
             sim_score = self.cosine_similarity(query_embedding, doc_embedding)
 
@@ -80,7 +101,7 @@ class SemanticRetriever:
                     "content": rec["content"],
                     "metadata": rec["metadata"],
                     "score": round(sim_score, 4),
-                    "chunk_id": rec["id"]
+                    "chunk_id": rec.get("chunk_id", rec["id"])
                 })
 
         scored_chunks.sort(key=lambda x: x["score"], reverse=True)

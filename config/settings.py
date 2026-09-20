@@ -8,13 +8,50 @@ Resolves settings dynamically from:
 """
 
 import os
-from typing import Optional
+from dataclasses import dataclass
+from typing import Optional, Dict, Any
 
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
     pass
+
+
+@dataclass(frozen=True)
+class ProviderVectorSpec:
+    """Deterministic vector specification for an AI provider and its Qdrant collection."""
+    provider_id: str
+    embedding_model: str
+    dimension: int
+    collection_name: str
+    distance_metric: str = "Cosine"
+
+
+# Deterministic Provider-to-Collection Vector Space Specifications
+PROVIDER_VECTOR_SPECS: Dict[str, ProviderVectorSpec] = {
+    "gemini": ProviderVectorSpec(
+        provider_id="gemini",
+        embedding_model="text-embedding-004",
+        dimension=768,
+        collection_name="p06_gemini_text_embedding_004",
+        distance_metric="Cosine",
+    ),
+    "nvidia_nim": ProviderVectorSpec(
+        provider_id="nvidia_nim",
+        embedding_model="nvidia/nv-embedqa-e5-v5",
+        dimension=1024,
+        collection_name="p06_nvidia_nv_embedqa_e5_v5",
+        distance_metric="Cosine",
+    ),
+    "openai": ProviderVectorSpec(
+        provider_id="openai",
+        embedding_model="text-embedding-3-small",
+        dimension=1536,
+        collection_name="p06_openai_text_embedding_3_small",
+        distance_metric="Cosine",
+    ),
+}
 
 
 class Config:
@@ -98,6 +135,22 @@ class Config:
         """Returns NVIDIA NIM embedding model name."""
         return cls._get_val("NVIDIA_EMBEDDING_MODEL", "nvidia/nv-embedqa-e5-v5")
 
+    # Qdrant Cloud Configuration
+    @classmethod
+    def get_qdrant_url(cls) -> str:
+        """Returns Qdrant Cloud cluster endpoint URL."""
+        return cls._get_val("QDRANT_URL", "")
+
+    @classmethod
+    def get_qdrant_api_key(cls) -> str:
+        """Returns Qdrant Cloud API key."""
+        return cls._get_val("QDRANT_API_KEY", "")
+
+    @classmethod
+    def is_qdrant_configured(cls) -> bool:
+        """Checks if Qdrant URL and API key are configured."""
+        return bool(cls.get_qdrant_url() and cls.get_qdrant_api_key())
+
     # Provider Readiness Helpers
     @classmethod
     def is_openai_configured(cls) -> bool:
@@ -113,3 +166,13 @@ class Config:
     def is_nvidia_configured(cls) -> bool:
         """Checks if NVIDIA NIM API key is present."""
         return bool(cls.get_nvidia_api_key())
+
+    @classmethod
+    def get_provider_spec(cls, provider_id: str) -> Optional[ProviderVectorSpec]:
+        """Returns vector specification for a given provider ID."""
+        return PROVIDER_VECTOR_SPECS.get(provider_id)
+
+    @classmethod
+    def get_all_provider_specs(cls) -> Dict[str, ProviderVectorSpec]:
+        """Returns all registered provider vector specifications."""
+        return dict(PROVIDER_VECTOR_SPECS)
