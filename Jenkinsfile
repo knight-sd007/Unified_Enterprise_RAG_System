@@ -69,7 +69,6 @@ pipeline {
         }
 
         stage('Push Docker Hub') {
-            when { branch 'main' }
             steps {
                 script {
                     echo "Publishing immutable container image ${IMAGE_FULL_TAG} to Docker Hub..."
@@ -83,7 +82,6 @@ pipeline {
         }
 
         stage('Deploy OCI') {
-            when { branch 'main' }
             steps {
                 script {
                     echo "Deploying P06 image ${IMAGE_FULL_TAG} to target host..."
@@ -101,7 +99,6 @@ pipeline {
         }
 
         stage('Post-Deployment Verification') {
-            when { branch 'main' }
             steps {
                 script {
                     sh """
@@ -172,7 +169,6 @@ pipeline {
         }
 
         stage('Target Disk Cleanup') {
-            when { branch 'main' }
             steps {
                 script {
                     echo "Performing disk cleanup for obsolete P06 images..."
