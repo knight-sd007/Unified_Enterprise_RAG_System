@@ -32,16 +32,16 @@ class ProviderVectorSpec:
 PROVIDER_VECTOR_SPECS: Dict[str, ProviderVectorSpec] = {
     "gemini": ProviderVectorSpec(
         provider_id="gemini",
-        embedding_model="text-embedding-004",
+        embedding_model="gemini-embedding-2",
         dimension=768,
-        collection_name="p06_gemini_text_embedding_004",
+        collection_name="p06_gemini_embedding_2_768",
         distance_metric="Cosine",
     ),
     "nvidia_nim": ProviderVectorSpec(
         provider_id="nvidia_nim",
-        embedding_model="nvidia/nv-embedqa-e5-v5",
-        dimension=1024,
-        collection_name="p06_nvidia_nv_embedqa_e5_v5",
+        embedding_model="nvidia/llama-nemotron-embed-1b-v2",
+        dimension=2048,
+        collection_name="p06_nvidia_llama_nemotron_embed_1b_v2_2048",
         distance_metric="Cosine",
     ),
     "openai": ProviderVectorSpec(
@@ -112,7 +112,7 @@ class Config:
     @classmethod
     def get_gemini_embedding_model(cls) -> str:
         """Returns Gemini embedding model name."""
-        return cls._get_val("GEMINI_EMBEDDING_MODEL", "text-embedding-004")
+        return cls._get_val("GEMINI_EMBEDDING_MODEL", "gemini-embedding-2")
 
     # NVIDIA NIM Configuration
     @classmethod
@@ -133,7 +133,7 @@ class Config:
     @classmethod
     def get_nvidia_embedding_model(cls) -> str:
         """Returns NVIDIA NIM embedding model name."""
-        return cls._get_val("NVIDIA_EMBEDDING_MODEL", "nvidia/nv-embedqa-e5-v5")
+        return cls._get_val("NVIDIA_EMBEDDING_MODEL", "nvidia/llama-nemotron-embed-1b-v2")
 
     # Qdrant Cloud Configuration
     @classmethod

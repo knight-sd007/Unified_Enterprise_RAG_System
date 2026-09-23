@@ -74,7 +74,7 @@ class TestGeminiProviderValidation(unittest.TestCase):
     @patch("config.settings.Config.is_gemini_configured", return_value=True)
     @patch("config.settings.Config.get_gemini_api_key", return_value="fake-gemini-key")
     def test_embed_documents_success_with_768_dim(self, mock_key, mock_cfg):
-        """When Gemini API returns valid 768-dim vector, it is successfully returned."""
+        """When Gemini API returns valid 768-dim vector, it is successfully returned and passes EmbedContentConfig."""
         with patch("google.genai.Client") as mock_client_cls:
             mock_client = MagicMock()
             mock_client_cls.return_value = mock_client
@@ -86,6 +86,38 @@ class TestGeminiProviderValidation(unittest.TestCase):
             embeddings = self.provider.embed_documents(["Test content"])
             self.assertEqual(len(embeddings), 1)
             self.assertEqual(len(embeddings[0]), 768)
+
+            # Verify call arguments
+            mock_client.models.embed_content.assert_called_once()
+            call_kwargs = mock_client.models.embed_content.call_args[1]
+            self.assertEqual(call_kwargs["model"], "gemini-embedding-2")
+            self.assertEqual(call_kwargs["contents"], "title: none | text: Test content")
+            config = call_kwargs["config"]
+            self.assertEqual(config.output_dimensionality, 768)
+            self.assertFalse(hasattr(config, "task_type") and config.task_type is not None)
+
+    @patch("config.settings.Config.is_gemini_configured", return_value=True)
+    @patch("config.settings.Config.get_gemini_api_key", return_value="fake-gemini-key")
+    def test_embed_query_success_with_768_dim_and_task_format(self, mock_key, mock_cfg):
+        """embed_query formats query with 'task: question answering | query:' and does not pass task_type."""
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+            mock_response = MagicMock()
+            mock_response.embedding = MagicMock(values=[0.05] * 768)
+            mock_response.embeddings = None
+            mock_client.models.embed_content.return_value = mock_response
+
+            query_vec = self.provider.embed_query("What is enterprise RAG?")
+            self.assertEqual(len(query_vec), 768)
+
+            mock_client.models.embed_content.assert_called_once()
+            call_kwargs = mock_client.models.embed_content.call_args[1]
+            self.assertEqual(call_kwargs["model"], "gemini-embedding-2")
+            self.assertEqual(call_kwargs["contents"], "task: question answering | query: What is enterprise RAG?")
+            config = call_kwargs["config"]
+            self.assertEqual(config.output_dimensionality, 768)
+            self.assertFalse(hasattr(config, "task_type") and config.task_type is not None)
 
 
 if __name__ == "__main__":

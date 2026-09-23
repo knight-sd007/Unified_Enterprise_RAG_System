@@ -47,6 +47,14 @@ class TestInMemoryVectorStore(unittest.TestCase):
             self.store.add_chunks(chunks, embeds, provider_id="gemini")
         self.assertIn("Expected dimension 768", str(ctx.exception))
 
+    def test_nvidia_dimension_mismatch(self):
+        """Adding non-2048 vectors for nvidia_nim provider should raise ValueError."""
+        chunks = [Chunk(content="A", metadata={"filename": "doc1.txt", "chunk_id": "c1"})]
+        embeds = [[0.1] * 1024]
+        with self.assertRaises(ValueError) as ctx:
+            self.store.add_chunks(chunks, embeds, provider_id="nvidia_nim")
+        self.assertIn("Expected dimension 2048", str(ctx.exception))
+
     def test_provider_mismatch_error(self):
         """Adding vectors with a different provider without clearing should raise ValueError."""
         chunks1 = [Chunk(content="A", metadata={"filename": "doc1.txt", "chunk_id": "c1"})]
@@ -54,7 +62,7 @@ class TestInMemoryVectorStore(unittest.TestCase):
         self.store.add_chunks(chunks1, embeds1, provider_id="gemini")
 
         chunks2 = [Chunk(content="B", metadata={"filename": "doc2.txt", "chunk_id": "c2"})]
-        embeds2 = [[0.2] * 1024]
+        embeds2 = [[0.2] * 2048]
 
         with self.assertRaises(ValueError) as ctx:
             self.store.add_chunks(chunks2, embeds2, provider_id="nvidia_nim")

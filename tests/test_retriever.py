@@ -21,7 +21,11 @@ class MockProvider(BaseAIProvider):
         return True
 
     def get_embedding_model_name(self) -> str:
-        return "text-embedding-004"
+        if self.provider_id == "gemini":
+            return "gemini-embedding-2"
+        elif self.provider_id == "nvidia_nim":
+            return "nvidia/llama-nemotron-embed-1b-v2"
+        return "text-embedding-3-small"
 
     def get_chat_model_name(self) -> str:
         return "gemini-2.5-flash"
@@ -85,7 +89,7 @@ class TestSemanticRetriever(unittest.TestCase):
     def test_retrieve_mismatched_provider_raises_error(self):
         """Retrieval with a provider different from active index provider must be rejected."""
         gemini_provider = MockProvider(provider_id="gemini", dim=768)
-        nvidia_provider = MockProvider(provider_id="nvidia_nim", dim=1024)
+        nvidia_provider = MockProvider(provider_id="nvidia_nim", name="NVIDIA NIM", dim=2048)
 
         chunks = [Chunk(content="Sample content", metadata={"filename": "doc.txt", "chunk_id": "c1"})]
         self.store.add_chunks(chunks, [[0.1] * 768], provider_id="gemini")

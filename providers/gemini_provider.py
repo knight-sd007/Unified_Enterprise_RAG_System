@@ -73,14 +73,21 @@ class GeminiProvider(BaseAIProvider):
 
         try:
             from google import genai
+            from google.genai import types
             client = genai.Client(api_key=api_key)
             logger.info(f"Generating Gemini document embeddings ({len(texts)} texts, model: '{model_name}')")
 
+            config = types.EmbedContentConfig(
+                output_dimensionality=expected_dim
+            )
+
             embeddings: List[List[float]] = []
             for text in texts:
+                formatted_text = f"title: none | text: {text}"
                 res = client.models.embed_content(
                     model=model_name,
-                    contents=text
+                    contents=formatted_text,
+                    config=config
                 )
                 raw_values = None
                 if hasattr(res, 'embedding') and res.embedding is not None and hasattr(res.embedding, 'values'):
@@ -103,13 +110,50 @@ class GeminiProvider(BaseAIProvider):
             raise RuntimeError(f"Gemini Embedding Error: {clean_err}")
 
     def embed_query(self, query: str) -> List[float]:
-        """Generates query embedding using Gemini API with strict validation."""
+        """Generates query embedding using Gemini API with strict validation and question-answering task formatting."""
         if not query or not query.strip():
             raise ValueError("Query text cannot be empty for embedding generation.")
-        results = self.embed_documents([query])
-        if not results or not results[0]:
-            raise RuntimeError("Gemini Embedding Error: Empty query embedding vector returned.")
-        return results[0]
+        if not self.is_configured():
+            raise ValueError("Google Gemini provider is not configured.")
+
+        api_key = Config.get_gemini_api_key()
+        model_name = self.get_embedding_model_name()
+        spec = Config.get_provider_spec("gemini")
+        expected_dim = spec.dimension if spec else EXPECTED_GEMINI_EMBEDDING_DIMENSION
+
+        try:
+            from google import genai
+            from google.genai import types
+            client = genai.Client(api_key=api_key)
+            logger.info(f"Generating Gemini query embedding (model: '{model_name}')")
+
+            config = types.EmbedContentConfig(
+                output_dimensionality=expected_dim
+            )
+
+            formatted_query = f"task: question answering | query: {query.strip()}"
+            res = client.models.embed_content(
+                model=model_name,
+                contents=formatted_query,
+                config=config
+            )
+            raw_values = None
+            if hasattr(res, 'embedding') and res.embedding is not None and hasattr(res.embedding, 'values'):
+                raw_values = res.embedding.values
+            elif hasattr(res, 'embeddings') and res.embeddings and len(res.embeddings) > 0:
+                raw_values = res.embeddings[0].values
+
+            if raw_values is None:
+                raise RuntimeError("Gemini Embedding Error: No embedding values found in Gemini API response.")
+
+            valid_vec = self._validate_vector(list(raw_values), expected_dim=expected_dim)
+            return valid_vec
+        except Exception as e:
+            clean_err = sanitize_error_message(e)
+            logger.error(f"Gemini query embedding error: {clean_err}")
+            if str(clean_err).startswith("Gemini Embedding Error:"):
+                raise RuntimeError(clean_err)
+            raise RuntimeError(f"Gemini Embedding Error: {clean_err}")
 
     def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """Generates chat completion using Gemini API."""

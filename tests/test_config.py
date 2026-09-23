@@ -15,16 +15,19 @@ class TestConfigurationAndSecurity(unittest.TestCase):
         """All 3 provider vector specifications must have correct dimensions, models, and collections."""
         gemini_spec = PROVIDER_VECTOR_SPECS["gemini"]
         self.assertEqual(gemini_spec.dimension, 768)
-        self.assertEqual(gemini_spec.collection_name, "p06_gemini_text_embedding_004")
+        self.assertEqual(gemini_spec.embedding_model, "gemini-embedding-2")
+        self.assertEqual(gemini_spec.collection_name, "p06_gemini_embedding_2_768")
         self.assertEqual(gemini_spec.distance_metric, "Cosine")
 
         nvidia_spec = PROVIDER_VECTOR_SPECS["nvidia_nim"]
-        self.assertEqual(nvidia_spec.dimension, 1024)
-        self.assertEqual(nvidia_spec.collection_name, "p06_nvidia_nv_embedqa_e5_v5")
+        self.assertEqual(nvidia_spec.dimension, 2048)
+        self.assertEqual(nvidia_spec.embedding_model, "nvidia/llama-nemotron-embed-1b-v2")
+        self.assertEqual(nvidia_spec.collection_name, "p06_nvidia_llama_nemotron_embed_1b_v2_2048")
         self.assertEqual(nvidia_spec.distance_metric, "Cosine")
 
         openai_spec = PROVIDER_VECTOR_SPECS["openai"]
         self.assertEqual(openai_spec.dimension, 1536)
+        self.assertEqual(openai_spec.embedding_model, "text-embedding-3-small")
         self.assertEqual(openai_spec.collection_name, "p06_openai_text_embedding_3_small")
         self.assertEqual(openai_spec.distance_metric, "Cosine")
 

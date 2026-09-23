@@ -10,11 +10,11 @@ It provides unified AI provider abstraction across **Google Gemini**, **NVIDIA N
 
 * **Unified AI Provider Abstraction**: A single selected provider (OpenAI, Google Gemini, or NVIDIA NIM) owns both vector embedding generation and chat generation.
 * **Qdrant Cloud Vector Database**: Persistent vector search engine with provider-specific collection routing:
-  * **Google Gemini**: `p06_gemini_text_embedding_004` (768 dimensions, Cosine)
-  * **NVIDIA NIM**: `p06_nvidia_nv_embedqa_e5_v5` (1024 dimensions, Cosine)
+  * **Google Gemini**: `p06_gemini_embedding_2_768` (768 dimensions, Cosine)
+  * **NVIDIA NIM**: `p06_nvidia_llama_nemotron_embed_1b_v2_2048` (2048 dimensions, Cosine)
   * **OpenAI**: `p06_openai_text_embedding_3_small` (1536 dimensions, Cosine, when provisioned)
 * **In-Memory Fallback Engine**: Local standalone vector search with NumPy matrix operations for exact Cosine Similarity evaluation.
-* **Vector Space Isolation & Dimension Protection**: Enforces provider identity and strict dimension checking (Gemini `768`, NVIDIA `1024`, OpenAI `1536`) to prevent cross-provider vector contamination.
+* **Vector Space Isolation & Dimension Protection**: Enforces provider identity and strict dimension checking (Gemini `768`, NVIDIA `2048`, OpenAI `1536`) to prevent cross-provider vector contamination.
 * **Deterministic Duplicate-Ingestion Protection**: Generates deterministic UUIDv5 identifiers from chunk content and metadata for idempotent re-indexing.
 * **Prompt Trust Boundary**: Treats all retrieved context snippets as untrusted passive reference data to mitigate prompt injection.
 * **Source Citation Back-References**: Answers include explicit file and chunk ID citations with similarity relevance scores.
@@ -35,7 +35,7 @@ Uploaded Files (PDF / TXT)
   DocumentChunker ──► Split into overlapping chunks
         │
         ▼
-   Active Provider ──► Generate validated embeddings (e.g., 768-dim / 1024-dim)
+   Active Provider ──► Generate validated embeddings (e.g., 768-dim / 2048-dim)
         │
         ▼
 QdrantVectorStore ──► Store chunk text + vectors in provider collection (UUIDv5)

@@ -35,7 +35,7 @@ class TestQdrantVectorStore(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             self.store.add_chunks(chunks, embeddings, provider_id="gemini")
 
-        self.assertIn("p06_gemini_text_embedding_004", str(ctx.exception))
+        self.assertIn("p06_gemini_embedding_2_768", str(ctx.exception))
         self.assertIn("does not exist on cluster", str(ctx.exception))
         # Ensure create_collection was NOT called
         self.assertFalse(hasattr(self.mock_client, "create_collection") and self.mock_client.create_collection.called)
@@ -54,7 +54,7 @@ class TestQdrantVectorStore(unittest.TestCase):
         # Verify upsert called with correct collection name
         self.mock_client.upsert.assert_called_once()
         call_kwargs = self.mock_client.upsert.call_args[1]
-        self.assertEqual(call_kwargs["collection_name"], "p06_gemini_text_embedding_004")
+        self.assertEqual(call_kwargs["collection_name"], "p06_gemini_embedding_2_768")
         points = call_kwargs["points"]
         self.assertEqual(len(points), 2)
         # Point ID must be deterministic UUIDv5
@@ -62,15 +62,15 @@ class TestQdrantVectorStore(unittest.TestCase):
         self.assertEqual(points[0].id, expected_id)
 
     def test_nvidia_routing_and_dimension(self):
-        """NVIDIA provider routes to 1024-dim collection."""
+        """NVIDIA provider routes to 2048-dim collection p06_nvidia_llama_nemotron_embed_1b_v2_2048."""
         chunks = [Chunk(content="NVIDIA chunk", metadata={"filename": "gpu.txt", "chunk_id": "c0"})]
-        embeddings = [[0.03] * 1024]
+        embeddings = [[0.03] * 2048]
 
         count = self.store.add_chunks(chunks, embeddings, provider_id="nvidia_nim")
         self.assertEqual(count, 1)
 
         call_kwargs = self.mock_client.upsert.call_args[1]
-        self.assertEqual(call_kwargs["collection_name"], "p06_nvidia_nv_embedqa_e5_v5")
+        self.assertEqual(call_kwargs["collection_name"], "p06_nvidia_llama_nemotron_embed_1b_v2_2048")
 
     def test_provider_mismatch_rejection_on_ingestion(self):
         """Switching providers without clearing raises ValueError."""
@@ -79,7 +79,7 @@ class TestQdrantVectorStore(unittest.TestCase):
 
         chunks2 = [Chunk(content="Chunk B", metadata={"filename": "doc.txt", "chunk_id": "c2"})]
         with self.assertRaises(ValueError) as ctx:
-            self.store.add_chunks(chunks2, [[0.02] * 1024], provider_id="nvidia_nim")
+            self.store.add_chunks(chunks2, [[0.02] * 2048], provider_id="nvidia_nim")
         self.assertIn("Provider mismatch", str(ctx.exception))
 
     def test_search_retrieves_scored_chunks(self):
