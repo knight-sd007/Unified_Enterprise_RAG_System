@@ -117,7 +117,7 @@ class InMemoryVectorStore:
         )
         return added_or_updated
 
-    def clear_store(self):
+    def clear_store(self, provider_id: Optional[str] = None):
         """Clears all stored records and resets dimension and provider metadata."""
         count_before = len(self._records_by_id)
         self._records_by_id.clear()
@@ -354,10 +354,43 @@ class QdrantVectorStore:
             return 0
 
     def clear_store(self, provider_id: Optional[str] = None):
-        """Clears active index session tracking."""
-        self._active_provider_id = None
-        self._embedding_dimension = None
-        logger.info("Cleared Qdrant vector store session metadata.")
+        """Clears indexed vector points from provider collection on Qdrant Cloud."""
+        target_provider = provider_id or self._active_provider_id
+        if not target_provider:
+            self._active_provider_id = None
+            self._embedding_dimension = None
+            logger.info("Cleared Qdrant vector store session metadata (no provider resolved).")
+            return
+
+        spec = self._validate_and_get_spec(target_provider)
+        client = self._get_client()
+
+        if not client.collection_exists(collection_name=spec.collection_name):
+            self._active_provider_id = None
+            self._embedding_dimension = None
+            logger.warning(
+                f"Collection '{spec.collection_name}' does not exist on Qdrant cluster. Skipped point deletion."
+            )
+            return
+
+        try:
+            from qdrant_client import models
+            client.delete(
+                collection_name=spec.collection_name,
+                points_selector=models.FilterSelector(
+                    filter=models.Filter()
+                ),
+                wait=True,
+            )
+            self._active_provider_id = None
+            self._embedding_dimension = None
+            logger.info(
+                f"Cleared all points from Qdrant collection '{spec.collection_name}' for provider '{target_provider}'."
+            )
+        except Exception as e:
+            clean_err = sanitize_error_message(e)
+            logger.error(f"Qdrant clear error on collection '{spec.collection_name}': {clean_err}")
+            raise RuntimeError(f"Qdrant Clear Error: {clean_err}")
 
     def get_embedding_dimension(self) -> Optional[int]:
         """Returns active embedding dimension."""

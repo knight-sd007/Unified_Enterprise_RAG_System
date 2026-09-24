@@ -86,7 +86,7 @@ class RAGPipeline:
     def clear_index(self, provider_id: Optional[str] = None):
         """Clears stored vector index."""
         if hasattr(self.vector_store, "clear_store"):
-            self.vector_store.clear_store()
+            self.vector_store.clear_store(provider_id=provider_id)
 
     def query(
         self,

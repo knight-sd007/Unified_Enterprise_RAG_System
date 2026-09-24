@@ -87,6 +87,13 @@ class TestRAGPipelineTelemetry(unittest.TestCase):
         self.assertEqual(stats["dimension"], "N/A")
         self.assertEqual(stats["provider_id"], "None")
 
+    def test_pipeline_clear_index_forwards_provider_id_to_store(self):
+        """pipeline.clear_index(provider_id='gemini') must forward provider_id to vector_store.clear_store."""
+        mock_store = MagicMock()
+        pipeline = RAGPipeline(vector_store=mock_store)
+        pipeline.clear_index(provider_id="gemini")
+        mock_store.clear_store.assert_called_once_with(provider_id="gemini")
+
 
 if __name__ == "__main__":
     unittest.main()

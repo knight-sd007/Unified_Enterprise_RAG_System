@@ -392,8 +392,8 @@ def render_sidebar(provider=None):
         # Actions section
         st.markdown("#### Maintenance Actions")
         if stats['count'] > 0 or active_p is not None:
-            if st.button("🗑️ Clear Vector Index", use_container_width=True, help="Wipes all in-memory or session index chunks."):
-                pipeline.clear_index()
+            if st.button("🗑️ Clear Vector Index", use_container_width=True, help="Clears indexed vectors for the active provider."):
+                pipeline.clear_index(provider_id=provider.provider_id)
                 st.session_state.ingested_files = []
                 st.session_state.chat_history = []
                 st.session_state.last_query_result = None

@@ -122,6 +122,17 @@ class TestInMemoryVectorStore(unittest.TestCase):
         self.assertEqual(stats_after_add["provider_id"], "gemini")
         self.assertEqual(stats_after_add["status"], "Indexed")
 
+    def test_in_memory_clear_store_signature_accepts_provider_id(self):
+        """InMemoryVectorStore.clear_store accepts provider_id without TypeError and clears store."""
+        chunk = Chunk(content="Test content", metadata={"filename": "doc.txt", "chunk_id": "c0"})
+        self.store.add_chunks([chunk], [[0.1] * 768], provider_id="gemini")
+        self.assertEqual(self.store.count(), 1)
+
+        self.store.clear_store(provider_id="gemini")
+        self.assertEqual(self.store.count(), 0)
+        self.assertIsNone(self.store.get_embedding_dimension())
+        self.assertIsNone(self.store.get_active_provider_id())
+
 
 if __name__ == "__main__":
     unittest.main()

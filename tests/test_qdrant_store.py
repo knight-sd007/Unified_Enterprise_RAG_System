@@ -160,6 +160,43 @@ class TestQdrantVectorStore(unittest.TestCase):
         self.assertEqual(stats["collection_name"], "N/A")
         self.assertEqual(stats["status"], "Ready")
 
+    def test_clear_store_gemini_deletes_points_in_qdrant(self):
+        """Clearing Gemini provider must call client.delete on p06_gemini_embedding_2_768 with filter selector."""
+        self.store.clear_store(provider_id="gemini")
+
+        self.mock_client.delete.assert_called_once()
+        call_kwargs = self.mock_client.delete.call_args[1]
+        self.assertEqual(call_kwargs["collection_name"], "p06_gemini_embedding_2_768")
+        self.assertTrue(call_kwargs.get("wait", False))
+        self.assertIsNotNone(call_kwargs.get("points_selector"))
+
+    def test_clear_store_provider_isolation(self):
+        """Clearing Gemini must target ONLY p06_gemini_embedding_2_768 and NOT other collections."""
+        self.store.clear_store(provider_id="gemini")
+
+        call_kwargs = self.mock_client.delete.call_args[1]
+        self.assertEqual(call_kwargs["collection_name"], "p06_gemini_embedding_2_768")
+        self.assertNotEqual(call_kwargs["collection_name"], "p06_nvidia_llama_nemotron_embed_1b_v2_2048")
+        self.assertNotEqual(call_kwargs["collection_name"], "p06_openai_text_embedding_3_small")
+
+    def test_clear_store_resets_active_provider_and_dimension(self):
+        """Clearing store must reset _active_provider_id and _embedding_dimension to None."""
+        self.store._active_provider_id = "gemini"
+        self.store._embedding_dimension = 768
+
+        self.store.clear_store(provider_id="gemini")
+        self.assertIsNone(self.store.get_active_provider_id())
+        self.assertIsNone(self.store.get_embedding_dimension())
+
+    def test_clear_store_no_provider_safe_return(self):
+        """When no provider is specified and none active, clear_store must not perform destructive delete."""
+        self.store._active_provider_id = None
+        self.store.clear_store(provider_id=None)
+
+        self.mock_client.delete.assert_not_called()
+        self.assertIsNone(self.store.get_active_provider_id())
+        self.assertIsNone(self.store.get_embedding_dimension())
+
 
 if __name__ == "__main__":
     unittest.main()
