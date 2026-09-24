@@ -9,10 +9,7 @@ import streamlit as st
 import os
 from config.settings import Config
 from utils.security import verify_access_key, sanitize_error_message
-from utils.logging import logger
-from providers.openai_provider import OpenAIProvider
-from providers.gemini_provider import GeminiProvider
-from providers.nvidia_nim_provider import NvidiaNimProvider
+from providers import get_provider_by_id, get_supported_provider_ids
 from rag.loaders import DocumentLoader, Document
 from rag.pipeline import RAGPipeline
 
@@ -508,17 +505,6 @@ def get_provider_label(provider_id: str) -> str:
     return provider_id
 
 
-def get_active_provider(provider_choice: str):
-    """Instantiates active provider object based on dropdown choice."""
-    if provider_choice == "openai":
-        return OpenAIProvider()
-    elif provider_choice == "gemini":
-        return GeminiProvider()
-    elif provider_choice == "nvidia_nim":
-        return NvidiaNimProvider()
-    return OpenAIProvider()
-
-
 def render_sidebar(provider=None):
     """Renders Sidebar Controls and Maintenance Actions."""
     with st.sidebar:
@@ -526,7 +512,7 @@ def render_sidebar(provider=None):
         st.caption("Active Provider & Session")
 
         # Provider Selector
-        options = ["openai", "gemini", "nvidia_nim"]
+        options = get_supported_provider_ids()
         current_selection = st.session_state.get("selected_provider", "openai")
         default_index = options.index(current_selection) if current_selection in options else 0
 
@@ -542,7 +528,7 @@ def render_sidebar(provider=None):
         st.session_state.selected_provider = provider_choice
 
         # Update provider if choice changed
-        provider = get_active_provider(provider_choice)
+        provider = get_provider_by_id(provider_choice)
         status = provider.get_status()
 
         if not status["configured"]:
