@@ -649,6 +649,18 @@ def render_app():
             unsafe_allow_html=True
         )
 
+        # Display last ingestion outcome if available
+        if st.session_state.last_ingest_result:
+            last_res = st.session_state.last_ingest_result
+            if last_res.get("status") == "success":
+                st.success(
+                    f"✅ Ingestion Complete: Successfully indexed {last_res['document_count']} document(s) "
+                    f"into {last_res['chunk_count']} vector chunks! (Vector Dim: {last_res['vector_dimension']}, "
+                    f"Collection: `{last_res.get('collection_name', 'In-Memory')}`)"
+                )
+            elif last_res.get("status") == "error":
+                st.error(f"Ingestion failed: {last_res.get('message')}")
+
         if st.button("🚀 Process & Ingest Documents", type="primary", use_container_width=True):
             if not uploaded_files:
                 st.warning("Please select at least one PDF or TXT file to ingest.")
@@ -675,12 +687,8 @@ def render_app():
                         st.session_state.last_ingest_result = res
 
                     if res.get("status") == "success":
-                        st.success(
-                            f"✅ Ingestion Complete: Successfully indexed {res['document_count']} document(s) "
-                            f"into {res['chunk_count']} vector chunks! (Vector Dim: {res['vector_dimension']}, "
-                            f"Collection: `{res.get('collection_name', 'In-Memory')}`)"
-                        )
                         st.session_state.ingested_files = list(set(st.session_state.ingested_files + [f.name for f in uploaded_files]))
+                        st.rerun()
                     else:
                         st.error(f"Ingestion failed: {res.get('message')}")
 

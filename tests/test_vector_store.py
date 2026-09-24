@@ -102,6 +102,26 @@ class TestInMemoryVectorStore(unittest.TestCase):
         self.assertNotEqual(id1, id3)
         self.assertNotEqual(id1, id4)
 
+    def test_get_stats_signature_parity_and_provider(self):
+        """get_stats accepts optional provider_id without TypeError and returns accurate metadata."""
+        stats_no_param = self.store.get_stats()
+        self.assertEqual(stats_no_param["count"], 0)
+        self.assertEqual(stats_no_param["dimension"], "N/A")
+        self.assertEqual(stats_no_param["provider_id"], "None")
+
+        stats_with_gemini = self.store.get_stats(provider_id="gemini")
+        self.assertEqual(stats_with_gemini["provider_id"], "gemini")
+        self.assertEqual(stats_with_gemini["count"], 0)
+
+        chunk = Chunk(content="Test content", metadata={"filename": "doc.txt", "chunk_id": "c0"})
+        self.store.add_chunks([chunk], [[0.1] * 768], provider_id="gemini")
+
+        stats_after_add = self.store.get_stats(provider_id="gemini")
+        self.assertEqual(stats_after_add["count"], 1)
+        self.assertEqual(stats_after_add["dimension"], 768)
+        self.assertEqual(stats_after_add["provider_id"], "gemini")
+        self.assertEqual(stats_after_add["status"], "Indexed")
+
 
 if __name__ == "__main__":
     unittest.main()

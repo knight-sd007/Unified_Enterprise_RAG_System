@@ -144,10 +144,7 @@ class RAGPipeline:
     def get_stats(self, provider_id: Optional[str] = None) -> Dict[str, Any]:
         """Returns current RAG pipeline statistics."""
         if hasattr(self.vector_store, "get_stats"):
-            try:
-                return self.vector_store.get_stats()
-            except TypeError:
-                return self.vector_store.get_stats()
+            return self.vector_store.get_stats(provider_id=provider_id)
         return {
             "count": 0,
             "dimension": "N/A",

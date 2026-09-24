@@ -141,12 +141,13 @@ class InMemoryVectorStore:
         """Returns active provider ID used for current vector index."""
         return self._active_provider_id
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self, provider_id: Optional[str] = None) -> Dict[str, Any]:
         """Returns vector store status statistics."""
+        target_provider = provider_id or self._active_provider_id or "None"
         return {
             "count": len(self._records_by_id),
             "dimension": self._embedding_dimension or "N/A",
-            "provider_id": self._active_provider_id or "None",
+            "provider_id": target_provider,
             "store_type": "In-Memory NumPy Vector Index",
             "status": "Indexed" if len(self._records_by_id) > 0 else "Empty"
         }

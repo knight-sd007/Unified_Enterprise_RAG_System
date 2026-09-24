@@ -123,6 +123,43 @@ class TestQdrantVectorStore(unittest.TestCase):
         count = self.store.add_chunks(chunks, [[0.01] * 768], provider_id="gemini")
         self.assertEqual(count, 1)
 
+    def test_get_stats_gemini_routing(self):
+        """get_stats with provider_id='gemini' queries p06_gemini_embedding_2_768 and returns 768 dims."""
+        mock_count = MagicMock()
+        mock_count.count = 42
+        self.mock_client.count.return_value = mock_count
+
+        stats = self.store.get_stats(provider_id="gemini")
+        self.assertEqual(stats["count"], 42)
+        self.assertEqual(stats["dimension"], 768)
+        self.assertEqual(stats["provider_id"], "gemini")
+        self.assertEqual(stats["collection_name"], "p06_gemini_embedding_2_768")
+        self.assertEqual(stats["status"], "Indexed")
+        self.mock_client.count.assert_called_with(collection_name="p06_gemini_embedding_2_768")
+
+    def test_get_stats_nvidia_routing(self):
+        """get_stats with provider_id='nvidia_nim' queries p06_nvidia_llama_nemotron_embed_1b_v2_2048 and returns 2048 dims."""
+        mock_count = MagicMock()
+        mock_count.count = 100
+        self.mock_client.count.return_value = mock_count
+
+        stats = self.store.get_stats(provider_id="nvidia_nim")
+        self.assertEqual(stats["count"], 100)
+        self.assertEqual(stats["dimension"], 2048)
+        self.assertEqual(stats["provider_id"], "nvidia_nim")
+        self.assertEqual(stats["collection_name"], "p06_nvidia_llama_nemotron_embed_1b_v2_2048")
+        self.assertEqual(stats["status"], "Indexed")
+        self.mock_client.count.assert_called_with(collection_name="p06_nvidia_llama_nemotron_embed_1b_v2_2048")
+
+    def test_get_stats_no_provider_fallback(self):
+        """get_stats without provider_id and without active provider returns safe Ready defaults."""
+        stats = self.store.get_stats()
+        self.assertEqual(stats["count"], 0)
+        self.assertEqual(stats["dimension"], "N/A")
+        self.assertEqual(stats["provider_id"], "None")
+        self.assertEqual(stats["collection_name"], "N/A")
+        self.assertEqual(stats["status"], "Ready")
+
 
 if __name__ == "__main__":
     unittest.main()
