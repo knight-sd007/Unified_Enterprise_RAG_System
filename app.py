@@ -28,161 +28,394 @@ st.set_page_config(
 # Custom Enterprise CSS for visual hierarchy, contrast, and responsive layout
 ENTERPRISE_CUSTOM_CSS = """
 <style>
-/* Enterprise Theme Adjustments */
+/* P06 Enterprise Design System Tokens */
+:root {
+    --p06-bg-base: #0B0F17;
+
+    --p06-bg-surface-1: #111827;
+    --p06-bg-surface-2: #1E293B;
+    --p06-bg-surface-elevated: #161F30;
+
+    --p06-border-subtle: rgba(255, 255, 255, 0.07);
+    --p06-border-card: #1F2937;
+    --p06-border-focus: rgba(59, 130, 246, 0.5);
+
+    --p06-text-primary: #F8FAFC;
+    --p06-text-secondary: #94A3B8;
+    --p06-text-muted: #64748B;
+    --p06-text-accent: #38BDF8;
+
+    --p06-brand-primary: #2563EB;
+    --p06-brand-primary-hover: #1D4ED8;
+
+    --p06-status-success: #10B981;
+    --p06-status-warning: #F59E0B;
+    --p06-status-error: #EF4444;
+    --p06-status-info: #0EA5E9;
+
+    --p06-spacing-1: 4px;
+    --p06-spacing-2: 8px;
+    --p06-spacing-3: 16px;
+    --p06-spacing-4: 24px;
+    --p06-spacing-5: 32px;
+
+    --p06-radius-sm: 6px;
+    --p06-radius-md: 10px;
+    --p06-radius-lg: 14px;
+
+    --p06-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25);
+    --p06-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.20);
+}
+
+/* Base application styling */
+.stApp {
+    background-color: var(--p06-bg-base);
+    color: var(--p06-text-primary);
+}
+
 .main .block-container {
-    padding-top: 1.8rem;
-    padding-bottom: 2.5rem;
+    padding-top: var(--p06-spacing-4);
+    padding-bottom: var(--p06-spacing-5);
     max-width: 1200px;
 }
 
 /* Header & Banner Styling */
 .app-header {
-    background: linear-gradient(135deg, rgba(15, 23, 42, 0.05) 0%, rgba(30, 41, 59, 0.08) 100%);
-    border: 1px solid rgba(148, 163, 184, 0.2);
-    border-radius: 12px;
-    padding: 1.25rem 1.5rem;
-    margin-bottom: 1.5rem;
+    background: var(--p06-bg-surface-1);
+    border: 1px solid var(--p06-border-card);
+    border-radius: var(--p06-radius-lg);
+    padding: var(--p06-spacing-3) var(--p06-spacing-4);
+    margin-bottom: var(--p06-spacing-4);
+    box-shadow: var(--p06-shadow-sm);
 }
 
 .app-header h1 {
-    font-size: 1.75rem;
+    color: var(--p06-text-primary);
+    font-size: 1.65rem;
     font-weight: 700;
-    margin-bottom: 0.25rem;
+    margin-bottom: var(--p06-spacing-1);
     letter-spacing: -0.02em;
 }
 
 .app-header p {
-    font-size: 0.95rem;
+    color: var(--p06-text-secondary);
+    font-size: 0.92rem;
     margin-bottom: 0;
-    opacity: 0.85;
+    line-height: 1.45;
 }
 
 /* Status & Tag Badges */
 .badge {
     display: inline-flex;
     align-items: center;
-    padding: 0.2rem 0.6rem;
+    padding: var(--p06-spacing-1) var(--p06-spacing-2);
     font-size: 0.75rem;
     font-weight: 600;
-    border-radius: 6px;
-    margin-right: 0.4rem;
-    margin-bottom: 0.2rem;
+    border-radius: var(--p06-radius-sm);
+    margin-right: var(--p06-spacing-1);
+    margin-bottom: var(--p06-spacing-1);
     letter-spacing: 0.02em;
     text-transform: uppercase;
 }
 
 .badge-blue {
-    background-color: rgba(37, 99, 235, 0.12);
-    color: #2563eb;
-    border: 1px solid rgba(37, 99, 235, 0.25);
+    background-color: rgba(37, 99, 235, 0.15);
+    color: var(--p06-text-accent);
+    border: 1px solid rgba(56, 189, 248, 0.3);
 }
 
 .badge-green {
-    background-color: rgba(22, 163, 74, 0.12);
-    color: #16a34a;
-    border: 1px solid rgba(22, 163, 74, 0.25);
+    background-color: rgba(16, 185, 129, 0.15);
+    color: var(--p06-status-success);
+    border: 1px solid rgba(16, 185, 129, 0.3);
 }
 
 .badge-amber {
-    background-color: rgba(217, 119, 6, 0.12);
-    color: #d97706;
-    border: 1px solid rgba(217, 119, 6, 0.25);
+    background-color: rgba(245, 158, 11, 0.15);
+    color: var(--p06-status-warning);
+    border: 1px solid rgba(245, 158, 11, 0.3);
 }
 
 .badge-slate {
-    background-color: rgba(100, 116, 139, 0.12);
-    color: #64748b;
-    border: 1px solid rgba(100, 116, 139, 0.25);
+    background-color: var(--p06-bg-surface-2);
+    color: var(--p06-text-secondary);
+    border: 1px solid var(--p06-border-card);
 }
 
 /* Prompt Trust Boundary Banner */
 .trust-boundary-card {
-    background-color: rgba(245, 158, 11, 0.06);
-    border: 1px solid rgba(245, 158, 11, 0.3);
-    border-left: 4px solid #f59e0b;
-    border-radius: 8px;
-    padding: 0.85rem 1.1rem;
-    margin-top: 1.25rem;
-    margin-bottom: 1.25rem;
+    background-color: rgba(245, 158, 11, 0.08);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-left: 4px solid var(--p06-status-warning);
+    border-radius: var(--p06-radius-md);
+    padding: var(--p06-spacing-3);
+    margin-top: var(--p06-spacing-3);
+    margin-bottom: var(--p06-spacing-3);
 }
 
 .trust-boundary-title {
     font-size: 0.85rem;
     font-weight: 700;
-    color: #d97706;
+    color: var(--p06-status-warning);
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    margin-bottom: 0.2rem;
+    margin-bottom: var(--p06-spacing-1);
 }
 
 .trust-boundary-desc {
-    font-size: 0.82rem;
+    font-size: 0.84rem;
+    color: var(--p06-text-secondary);
     margin-bottom: 0;
-    opacity: 0.9;
-    line-height: 1.4;
+    line-height: 1.45;
 }
 
 /* Elevated Answer Container */
 .answer-container {
-    background-color: rgba(30, 41, 59, 0.03);
-    border: 1px solid rgba(148, 163, 184, 0.25);
-    border-radius: 10px;
-    padding: 1.25rem 1.5rem;
-    margin-top: 1rem;
-    margin-bottom: 1rem;
+    background-color: var(--p06-bg-surface-elevated);
+    border: 1px solid var(--p06-border-card);
+    border-radius: var(--p06-radius-md);
+    padding: var(--p06-spacing-4);
+    margin-top: var(--p06-spacing-3);
+    margin-bottom: var(--p06-spacing-3);
+    color: var(--p06-text-primary);
+    line-height: 1.6;
+    box-shadow: var(--p06-shadow-sm);
 }
 
 /* Card Container for Features/Stats */
 .feature-card {
-    background-color: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(148, 163, 184, 0.2);
-    border-radius: 10px;
-    padding: 1.1rem;
-    margin-bottom: 1rem;
+    background-color: var(--p06-bg-surface-1);
+    border: 1px solid var(--p06-border-card);
+    border-radius: var(--p06-radius-md);
+    padding: var(--p06-spacing-3);
+    margin-bottom: var(--p06-spacing-3);
     height: 100%;
+    box-shadow: var(--p06-shadow-sm);
 }
 
 .feature-card h4 {
-    font-size: 1rem;
+    color: var(--p06-text-primary);
+    font-size: 0.98rem;
     font-weight: 600;
-    margin-bottom: 0.4rem;
+    margin-bottom: var(--p06-spacing-1);
 }
 
 .feature-card p {
-    font-size: 0.85rem;
-    opacity: 0.85;
+    color: var(--p06-text-secondary);
+    font-size: 0.86rem;
     margin-bottom: 0;
     line-height: 1.45;
 }
 
 /* Login Card Container */
 .login-box {
-    border: 1px solid rgba(148, 163, 184, 0.25);
-    border-radius: 12px;
-    padding: 2rem;
-    background: rgba(30, 41, 59, 0.02);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+    border: 1px solid var(--p06-border-card);
+    border-radius: var(--p06-radius-lg);
+    padding: var(--p06-spacing-4);
+    background: var(--p06-bg-surface-1);
+    box-shadow: var(--p06-shadow-md);
 }
 
 /* Metric chip */
 .metric-chip {
-    padding: 0.6rem 0.8rem;
-    border-radius: 8px;
-    background: rgba(148, 163, 184, 0.08);
-    border: 1px solid rgba(148, 163, 184, 0.15);
-    margin-bottom: 0.5rem;
+    padding: var(--p06-spacing-2) var(--p06-spacing-3);
+    border-radius: var(--p06-radius-sm);
+    background: var(--p06-bg-surface-2);
+    border: 1px solid var(--p06-border-card);
+    margin-bottom: var(--p06-spacing-2);
 }
+
 .metric-chip-label {
     font-size: 0.72rem;
+    color: var(--p06-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.03em;
-    opacity: 0.7;
-    margin-bottom: 0.1rem;
+    margin-bottom: 2px;
 }
+
 .metric-chip-value {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--p06-text-primary);
+    font-family: monospace;
+}
+
+/* Reusable Conceptual Surface Classes (Design System Foundation) */
+.p06-surface {
+    background-color: var(--p06-bg-surface-1);
+    border: 1px solid var(--p06-border-card);
+    border-radius: var(--p06-radius-md);
+}
+
+.p06-surface-elevated {
+    background-color: var(--p06-bg-surface-elevated);
+    border: 1px solid var(--p06-border-card);
+    border-radius: var(--p06-radius-md);
+    box-shadow: var(--p06-shadow-sm);
+}
+
+.p06-card {
+    background-color: var(--p06-bg-surface-1);
+    border: 1px solid var(--p06-border-card);
+    border-radius: var(--p06-radius-md);
+    padding: var(--p06-spacing-3);
+    box-shadow: var(--p06-shadow-sm);
+}
+
+.p06-card-header {
     font-size: 0.95rem;
     font-weight: 600;
+    color: var(--p06-text-primary);
+    margin-bottom: var(--p06-spacing-2);
+}
+
+.p06-card-body {
+    font-size: 0.88rem;
+    color: var(--p06-text-secondary);
+    line-height: 1.5;
+}
+
+.p06-muted {
+    color: var(--p06-text-muted);
+}
+
+.p06-metadata {
+    font-size: 0.78rem;
+    color: var(--p06-text-secondary);
     font-family: monospace;
+}
+
+.p06-status {
+    display: inline-flex;
+    align-items: center;
+    padding: var(--p06-spacing-1) var(--p06-spacing-2);
+    border-radius: var(--p06-radius-sm);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.p06-status-success {
+    background-color: rgba(16, 185, 129, 0.15);
+    color: var(--p06-status-success);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.p06-status-warning {
+    background-color: rgba(245, 158, 11, 0.15);
+    color: var(--p06-status-warning);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.p06-status-error {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: var(--p06-status-error);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.p06-status-info {
+    background-color: rgba(14, 165, 233, 0.15);
+    color: var(--p06-status-info);
+    border: 1px solid rgba(14, 165, 233, 0.3);
+}
+
+/* Compact Telemetry HUD */
+.p06-hud-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: var(--p06-spacing-3);
+    margin-bottom: var(--p06-spacing-4);
+}
+
+.p06-hud-card {
+    background-color: var(--p06-bg-surface-1);
+    border: 1px solid var(--p06-border-card);
+    border-radius: var(--p06-radius-md);
+    padding: var(--p06-spacing-2) var(--p06-spacing-3);
+    box-shadow: var(--p06-shadow-sm);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+}
+
+.p06-hud-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--p06-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 2px;
+}
+
+.p06-hud-value {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--p06-text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.p06-hud-sub {
+    font-size: 0.72rem;
+    color: var(--p06-text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+    font-family: monospace;
+}
+
+/* Streamlit Native Component Polishing */
+[data-testid="stSidebar"] {
+    background-color: var(--p06-bg-surface-1);
+    border-right: 1px solid var(--p06-border-card);
+}
+
+[data-testid="stExpander"] {
+    background-color: var(--p06-bg-surface-1);
+    border: 1px solid var(--p06-border-card) !important;
+    border-radius: var(--p06-radius-md) !important;
+    box-shadow: var(--p06-shadow-sm);
+}
+
+.stButton > button[kind="primary"] {
+    background-color: var(--p06-brand-primary);
+    color: var(--p06-text-primary);
+    border: 1px solid var(--p06-brand-primary);
+    border-radius: var(--p06-radius-sm);
+    font-weight: 600;
+    transition: background-color 0.15s ease-in-out;
+}
+
+.stButton > button[kind="primary"]:hover {
+    background-color: var(--p06-brand-primary-hover);
+    border-color: var(--p06-brand-primary-hover);
+}
+
+.stButton > button:not([kind="primary"]) {
+    background-color: var(--p06-bg-surface-2);
+    color: var(--p06-text-primary);
+    border: 1px solid var(--p06-border-card);
+    border-radius: var(--p06-radius-sm);
+    font-weight: 500;
+    transition: border-color 0.15s ease-in-out;
+}
+
+.stButton > button:not([kind="primary"]):hover {
+    border-color: var(--p06-text-accent);
+}
+
+/* Metric Display Harmony */
+[data-testid="stMetricValue"] {
+    color: var(--p06-text-primary) !important;
+    font-weight: 700 !important;
+}
+
+[data-testid="stMetricLabel"] {
+    color: var(--p06-text-muted) !important;
+    font-size: 0.8rem !important;
 }
 </style>
 """
@@ -287,10 +520,10 @@ def get_active_provider(provider_choice: str):
 
 
 def render_sidebar(provider=None):
-    """Renders Sidebar Controls, Provider Diagnostics, and Index Stats."""
+    """Renders Sidebar Controls and Maintenance Actions."""
     with st.sidebar:
         st.markdown("### ⚙️ Pipeline Control")
-        st.caption("Active Provider & Vector Storage")
+        st.caption("Active Provider & Session")
 
         # Provider Selector
         options = ["openai", "gemini", "nvidia_nim"]
@@ -312,73 +545,14 @@ def render_sidebar(provider=None):
         provider = get_active_provider(provider_choice)
         status = provider.get_status()
 
-        # Provider Status Section
-        st.markdown("---")
-        st.markdown("#### Provider Status")
-
-        status_class = "badge-green" if status["configured"] else "badge-amber"
-        status_label = "Configured & Ready" if status["configured"] else "Credentials Required"
-
-        st.markdown(
-            f"""
-            <div style="margin-bottom: 0.75rem;">
-                <span class="badge {status_class}">{status['status_icon']} {status_label}</span>
-            </div>
-            <div class="metric-chip">
-                <div class="metric-chip-label">Embedding Model</div>
-                <div class="metric-chip-value">{status['embedding_model']}</div>
-            </div>
-            <div class="metric-chip">
-                <div class="metric-chip-label">Chat Model</div>
-                <div class="metric-chip-value">{status['chat_model']}</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
         if not status["configured"]:
             st.warning(f"⚠️ Provider '{status['name']}' requires API credentials. Configure environment variables in `.env`.")
 
-        st.markdown("---")
-
-        # Vector Storage & Index Stats
         pipeline = st.session_state.rag_pipeline
         stats = pipeline.get_stats(provider.provider_id)
-        spec = Config.get_provider_spec(provider.provider_id)
-
-        st.markdown("#### Vector Storage & Index")
-        store_type = stats.get('store_type', 'Vector Store')
-        backend_badge = "badge-blue" if "Qdrant" in store_type else "badge-slate"
-
-        st.markdown(
-            f"""
-            <div style="margin-bottom: 0.75rem;">
-                <span class="badge {backend_badge}">Storage: {store_type}</span>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.metric("Total Chunks", stats['count'])
-        with col_b:
-            dim_val = str(stats['dimension']) if stats['dimension'] else "N/A"
-            st.metric("Vector Dim", dim_val)
-
-        if spec:
-            st.markdown(
-                f"""
-                <div class="metric-chip">
-                    <div class="metric-chip-label">Target Collection</div>
-                    <div class="metric-chip-value" style="font-size: 0.8rem;">{spec.collection_name}</div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+        active_p = pipeline.vector_store.get_active_provider_id()
 
         # Provider mismatch warning in sidebar
-        active_p = pipeline.vector_store.get_active_provider_id()
         if active_p is not None and active_p != provider.provider_id:
             st.error(
                 f"⚠️ **Vector Space Mismatch**\n\n"
@@ -415,27 +589,71 @@ def render_app():
 
     # Resolve active provider through sidebar
     provider = render_sidebar()
+    status = provider.get_status()
 
     pipeline = st.session_state.rag_pipeline
     active_p = pipeline.vector_store.get_active_provider_id()
     spec = Config.get_provider_spec(provider.provider_id)
     stats = pipeline.get_stats(provider.provider_id)
 
-    # Enterprise Header
+    # Enterprise Global Header
     st.markdown(
-        """
+        f"""
         <div class="app-header">
-            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
                 <div>
-                    <h1 style="margin: 0; color: inherit;">🔍 Unified Enterprise RAG System</h1>
-                    <p style="margin-top: 0.3rem;">
-                        Production-grade document ingestion, high-dimensional vector search, and citation-backed question answering.
+                    <h1 style="margin: 0; color: var(--p06-text-primary);">🔍 Unified Enterprise RAG</h1>
+                    <p style="margin-top: 0.25rem; color: var(--p06-text-secondary); font-size: 0.88rem;">
+                        Grounded knowledge retrieval & enterprise document intelligence workspace
                     </p>
                 </div>
-                <div>
+                <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+                    <span class="badge badge-green">● Operational</span>
                     <span class="badge badge-blue">Enterprise Edition</span>
-                    <span class="badge badge-green">Production Gate Active</span>
+                    <span class="badge badge-slate">Production Gate</span>
                 </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    # Compact Telemetry HUD
+    store_type = stats.get('store_type', 'Vector Store')
+    dim_str = f"{stats['dimension']}-dim" if stats.get('dimension') and stats['dimension'] != "N/A" else (f"{spec.dimension}-dim" if spec else "Dynamic")
+    chunk_count = stats.get('count', 0)
+    status_label = stats.get('status', 'Ready')
+    status_badge_class = "badge-green" if status_label in ["Indexed", "Ready"] else "badge-amber"
+    storage_badge_class = "badge-blue" if "Qdrant" in store_type else "badge-slate"
+    col_name = spec.collection_name if spec else "In-Memory"
+
+    st.markdown(
+        f"""
+        <div class="p06-hud-container">
+            <div class="p06-hud-card">
+                <div class="p06-hud-label">Active Provider</div>
+                <div class="p06-hud-value">{status['status_icon']} {provider.name}</div>
+                <div class="p06-hud-sub">{status.get('chat_model', '')}</div>
+            </div>
+            <div class="p06-hud-card">
+                <div class="p06-hud-label">Embedding Space</div>
+                <div class="p06-hud-value">{dim_str}</div>
+                <div class="p06-hud-sub">{status.get('embedding_model', '')}</div>
+            </div>
+            <div class="p06-hud-card">
+                <div class="p06-hud-label">Indexed Content</div>
+                <div class="p06-hud-value">{chunk_count} Chunks</div>
+                <div class="p06-hud-sub">{len(st.session_state.ingested_files)} document(s)</div>
+            </div>
+            <div class="p06-hud-card">
+                <div class="p06-hud-label">Vector Storage</div>
+                <div class="p06-hud-value"><span class="badge {storage_badge_class}" style="margin: 0; padding: 2px 6px; font-size: 0.72rem;">{store_type}</span></div>
+                <div class="p06-hud-sub" title="{col_name}">Collection: {col_name}</div>
+            </div>
+            <div class="p06-hud-card">
+                <div class="p06-hud-label">System Status</div>
+                <div class="p06-hud-value"><span class="badge {status_badge_class}" style="margin: 0; padding: 2px 6px; font-size: 0.72rem;">● {status_label}</span></div>
+                <div class="p06-hud-sub">Isolation: Enforced</div>
             </div>
         </div>
         """,
