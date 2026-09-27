@@ -8,9 +8,9 @@ services:
     container_name: p06_rag_system
     restart: unless-stopped
     ports:
-      - "${P06_HOST_PORT:-8006}:8501"
+      - "${P06_HOST_PORT:-8006}:8000"
     environment:
-      - APP_ACCESS_KEY=${APP_ACCESS_KEY:-admin123}
+      - APP_ACCESS_KEY=${APP_ACCESS_KEY:-}
       - AI_PROVIDER=${AI_PROVIDER:-gemini}
       # Google Gemini
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
@@ -36,7 +36,7 @@ services:
         reservations:
           memory: 256M
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=4)"]
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4)"]
       interval: 30s
       timeout: 5s
       retries: 3

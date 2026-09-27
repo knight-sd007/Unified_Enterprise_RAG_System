@@ -105,7 +105,7 @@ pipeline {
                         MAX_ATTEMPTS=15
                         SLEEP_SECONDS=2
                         CURL_TIMEOUT=2
-                        HEALTH_URL="http://127.0.0.1:8006/_stcore/health"
+                        HEALTH_URL="http://127.0.0.1:8006/api/v1/health"
 
                         echo "Layer 1 Verification: Internal application readiness check (\$HEALTH_URL)..."
 
@@ -120,7 +120,7 @@ pipeline {
                                 SUCCESS=1
                                 break
                             else
-                                echo "[Attempt \$ATTEMPT/\$MAX_ATTEMPTS] Streamlit starting up (HTTP \$HTTP_CODE). Retrying..."
+                                echo "[Attempt \$ATTEMPT/\$MAX_ATTEMPTS] FastAPI starting up (HTTP \$HTTP_CODE). Retrying..."
                                 if [ "\$ATTEMPT" -lt "\$MAX_ATTEMPTS" ]; then
                                     sleep "\$SLEEP_SECONDS"
                                 fi

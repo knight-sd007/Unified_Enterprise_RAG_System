@@ -6,13 +6,15 @@ health probes, session authentication, and protected OpenAPI documentation.
 """
 
 import os
+from pathlib import Path
 from typing import List, Optional
 from fastapi import FastAPI, Depends, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -228,4 +230,70 @@ async def get_protected_swagger_ui_v1(authenticated: bool = Depends(require_auth
     return get_swagger_ui_html(
         openapi_url="/api/v1/openapi.json",
         title=f"{app.title} — API Documentation",
+    )
+
+
+# -----------------------------------------------------------------------------
+# Frontend Static Asset Serving and SPA Routing
+# -----------------------------------------------------------------------------
+
+_FRONTEND_DIST_ENV = os.getenv("FRONTEND_DIST_DIR", "")
+if _FRONTEND_DIST_ENV:
+    FRONTEND_DIST_DIR = Path(_FRONTEND_DIST_ENV).resolve()
+else:
+    FRONTEND_DIST_DIR = (Path(__file__).resolve().parent.parent / "frontend" / "dist").resolve()
+
+_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
+if _ASSETS_DIR.is_dir():
+    app.mount("/assets", StaticFiles(directory=str(_ASSETS_DIR)), name="assets")
+
+
+@app.get("/", include_in_schema=False)
+async def serve_root():
+    """Serves the built React SPA index.html or baseline status info."""
+    index_file = FRONTEND_DIST_DIR / "index.html"
+    if index_file.is_file():
+        return FileResponse(str(index_file))
+    return JSONResponse(
+        status_code=200,
+        content={
+            "service": "Unified Enterprise RAG System API",
+            "status": "ONLINE",
+            "version": "1.0.0",
+            "api_docs": "/docs",
+            "health": "/api/v1/health",
+        },
+    )
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_spa_fallback(full_path: str):
+    """
+    Serves static files or falls back to index.html for client-side routing.
+    Does NOT swallow /api/*, /docs, or /openapi.json routes.
+    """
+    # Guard against intercepting non-existent API or system routes
+    if (
+        full_path.startswith("api/")
+        or full_path.startswith("docs")
+        or full_path.startswith("openapi.json")
+    ):
+        raise StarletteHTTPException(
+            status_code=404,
+            detail=f"Endpoint /{full_path} not found.",
+        )
+
+    # Check if a specific static file exists in dist (e.g. favicon.ico, vite.svg)
+    file_path = FRONTEND_DIST_DIR / full_path
+    if file_path.is_file():
+        return FileResponse(str(file_path))
+
+    # Fallback to SPA index.html
+    index_file = FRONTEND_DIST_DIR / "index.html"
+    if index_file.is_file():
+        return FileResponse(str(index_file))
+
+    raise StarletteHTTPException(
+        status_code=404,
+        detail=f"Resource /{full_path} not found.",
     )

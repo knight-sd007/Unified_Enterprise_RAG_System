@@ -2,9 +2,8 @@
 Centralized Configuration Manager for Unified Enterprise RAG System.
 
 Resolves settings dynamically from:
-1. Streamlit Secrets (st.secrets) when hosted in cloud environment.
-2. Local .env file for local development.
-3. System Environment Variables (os.environ).
+1. Local .env file for local development.
+2. System Environment Variables (os.environ).
 """
 
 import os
@@ -59,16 +58,7 @@ class Config:
 
     @staticmethod
     def _get_val(key: str, default: str = "") -> str:
-        """Helper to retrieve environment key from st.secrets or os.getenv."""
-        try:
-            import streamlit as st
-            if hasattr(st, "secrets") and key in st.secrets:
-                val = st.secrets[key]
-                if val is not None:
-                    return str(val).strip()
-        except Exception:
-            pass
-
+        """Helper to retrieve environment variable with optional default."""
         val = os.getenv(key, default)
         return str(val).strip() if val is not None else default
 

@@ -1,6 +1,6 @@
 # Unified Enterprise RAG System
 
-A modular, production-ready Retrieval-Augmented Generation (RAG) platform built with Python, Qdrant Cloud, NumPy, and Streamlit.
+A modular, production-ready Retrieval-Augmented Generation (RAG) platform built with Python, FastAPI, React, TypeScript, Tailwind CSS, Qdrant Cloud, and NumPy.
 
 It provides unified AI provider abstraction across **Google Gemini**, **NVIDIA NIM**, and **OpenAI**, enabling document ingestion, sliding-window text chunking, persistent Qdrant Cloud and in-memory vector indexing, deterministic duplicate protection, prompt trust-boundary hardening, and citation-backed question answering.
 
@@ -18,50 +18,63 @@ It provides unified AI provider abstraction across **Google Gemini**, **NVIDIA N
 * **Deterministic Duplicate-Ingestion Protection**: Generates deterministic UUIDv5 identifiers from chunk content and metadata for idempotent re-indexing.
 * **Prompt Trust Boundary**: Treats all retrieved context snippets as untrusted passive reference data to mitigate prompt injection.
 * **Source Citation Back-References**: Answers include explicit file and chunk ID citations with similarity relevance scores.
-* **Authentication Access Gate**: Constant-time comparison access key protection (`APP_ACCESS_KEY`).
-* **Security & Secret Sanitization**: Redacts API keys and sensitive credentials from error logs and UI outputs.
+* **FastAPI Authoritative REST API**: Production-grade REST backend exposing `/api/v1/health`, `/api/v1/auth/*`, `/api/v1/providers`, `/api/v1/documents/*`, and `/api/v1/rag/*`.
+* **React + TypeScript + Vite Frontend**: Dual-pane enterprise workspace with live telemetry HUD, drag-and-drop document ingestion, grounded Q&A with expandable citations, and diagnostics.
+* **Single-Origin Deployment**: Frontend static assets served directly from FastAPI or via reverse-proxy on `https://rag.vaikuntrix.in/`.
+* **Security & Secret Sanitization**: Redacts API keys and sensitive credentials from error logs and UI outputs. Constant-time signature verification on auth tokens.
 
 ---
 
 ## 🏗️ Architecture Overview
 
 ```text
-Uploaded Files (PDF / TXT)
-        │
-        ▼
-   DocumentLoader ──► Extract raw text & metadata
-        │
-        ▼
-  DocumentChunker ──► Split into overlapping chunks
-        │
-        ▼
-   Active Provider ──► Generate validated embeddings (e.g., 768-dim / 2048-dim)
-        │
-        ▼
-QdrantVectorStore ──► Store chunk text + vectors in provider collection (UUIDv5)
-        │
-        ▼
-SemanticRetriever ──► Query top-K chunks with similarity threshold filtering
-        │
-        ▼
-   Active Provider ──► Generate citation-backed RAG answer (Untrusted Context)
+Browser / Client (React 18 + TypeScript + Vite SPA)
+                    │
+                    ▼  (HTTPS / REST)
+       FastAPI Application Entrypoint (:8000)
+                    │
+        ┌───────────┴───────────┐
+        ▼                       ▼
+  /api/v1/documents/ingest   /api/v1/rag/query
+        │                       │
+        ▼                       ▼
+  DocumentLoader         SemanticRetriever
+  DocumentChunker               │
+        │                       ▼
+        ▼                Active AI Provider (Gemini / NVIDIA / OpenAI)
+ Qdrant Cloud / NumPy           │
+  (UUIDv5 Deduplicated)         ▼
+                         Citation-Backed Response
 ```
 
 ---
 
 ## 🚀 Quickstart Guide
 
-### 1. Installation
+### 1. Backend Setup & Installation
 
-Clone the repository and install dependencies:
+Clone the repository and install backend Python dependencies:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Environment Configuration
+### 2. Frontend Setup & Build
 
-Copy `.env.example` to `.env` and configure your API keys:
+Install frontend dependencies and compile static assets:
+
+```bash
+cd frontend
+npm install
+npm run build
+cd ..
+```
+
+### 3. Environment Configuration
+
+Copy `.env.example` to `.env` and configure your credentials:
 
 ```bash
 cp .env.example .env
@@ -69,7 +82,7 @@ cp .env.example .env
 
 Example `.env`:
 ```ini
-APP_ACCESS_KEY=admin123
+APP_ACCESS_KEY=your-secure-access-key
 AI_PROVIDER=gemini
 
 # Provider Credentials
@@ -82,21 +95,28 @@ QDRANT_URL=https://your-cluster.qdrant.tech:6333
 QDRANT_API_KEY=your_qdrant_api_key_here
 ```
 
-### 3. Running the Web Application
+### 4. Running the Application
 
-Launch the Streamlit interface:
+Launch the FastAPI unified service (serves both API and built React SPA):
 
 ```bash
-streamlit run app.py
+python -m uvicorn api.main:app --host 0.0.0.0 --port 8000
 ```
 
-Open your browser at `http://localhost:8501`, enter the access key (`admin123`), upload a PDF or TXT file, index documents, and begin asking questions!
+Open your browser at `http://localhost:8000`, enter your configured `APP_ACCESS_KEY`, upload documents, and explore multi-provider grounded RAG!
+
+For frontend development with hot-reloading:
+
+```bash
+cd frontend
+npm run dev
+```
 
 ---
 
-## 🧪 Running Unit Tests
+## 🧪 Running Automated Tests
 
-Run the test suite using `pytest`:
+Run the complete test suite using `pytest`:
 
 ```bash
 pytest tests/
@@ -108,12 +128,14 @@ Or:
 python3 -m unittest discover tests/
 ```
 
+---
+
 ## 🔒 Security Best Practices
 
-* Secrets are loaded dynamically via `os.environ` / `st.secrets`—never committed to source code.
-* Constant-time string comparison (`hmac.compare_digest`) prevents timing side-channel attacks on access gates.
-* Errors and logs are sanitized using regex redaction before output.
-* Retrieved document content is marked as untrusted passive reference data.
+* **No Hardcoded Secrets**: Secrets are loaded exclusively from runtime environment variables (`os.environ`).
+* **Constant-Time Verification**: Uses `hmac.compare_digest` for access key verification and token signatures.
+* **Redaction & Sanitization**: Sensitive API keys and internal stack traces are redacted before client responses.
+* **Least Privilege Container**: Runs as unprivileged non-root user (`UID: 65532`) on Distroless Linux base.
 
 ---
 
