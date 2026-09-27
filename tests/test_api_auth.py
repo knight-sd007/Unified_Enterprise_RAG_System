@@ -104,6 +104,15 @@ class TestAPIAuth(unittest.TestCase):
         self.assertEqual(status_res.status_code, 200)
         self.assertFalse(status_res.json().get("authenticated"))
 
+    @patch("config.settings.Config.get_app_access_key", return_value="")
+    def test_login_fails_when_access_key_not_configured(self, _mock_key):
+        """When server has no configured APP_ACCESS_KEY, login returns 500 AUTH_CONFIGURATION_ERROR."""
+        response = self.client.post("/api/v1/auth/login", json={"access_key": "any-key"})
+        self.assertEqual(response.status_code, 500)
+        data = response.json()
+        self.assertIn("error", data)
+        self.assertEqual(data["error"]["code"], "AUTH_CONFIGURATION_ERROR")
+
 
 if __name__ == "__main__":
     unittest.main()

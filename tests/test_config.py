@@ -55,9 +55,14 @@ class TestConfigurationAndSecurity(unittest.TestCase):
 
     def test_verify_access_key_timing_safe(self):
         """verify_access_key properly authenticates matching key and rejects incorrect keys."""
-        self.assertTrue(verify_access_key("admin123", "admin123"))
-        self.assertFalse(verify_access_key("wrong_key", "admin123"))
-        self.assertFalse(verify_access_key("", "admin123"))
+        self.assertTrue(verify_access_key("secret_key_1", "secret_key_1"))
+        self.assertFalse(verify_access_key("wrong_key", "secret_key_1"))
+        self.assertFalse(verify_access_key("", "secret_key_1"))
+
+    @patch.dict("os.environ", {"APP_ACCESS_KEY": ""}, clear=True)
+    def test_app_access_key_empty_when_unset(self):
+        """get_app_access_key returns empty string when APP_ACCESS_KEY is not set (no hardcoded fallback)."""
+        self.assertEqual(Config.get_app_access_key(), "")
 
 
 if __name__ == "__main__":

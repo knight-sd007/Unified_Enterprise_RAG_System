@@ -32,7 +32,13 @@ class APIError(Exception):
 
 def _get_serializer() -> URLSafeTimedSerializer:
     """Returns timed serializer using application access key as signing secret."""
-    secret = Config.get_app_access_key() or "p06-default-internal-secret"
+    secret = Config.get_app_access_key()
+    if not secret:
+        raise APIError(
+            status_code=500,
+            code="AUTH_CONFIGURATION_ERROR",
+            message="Application access key is not configured.",
+        )
     return URLSafeTimedSerializer(secret_key=secret, salt=SESSION_SALT)
 
 
@@ -49,11 +55,11 @@ def verify_session_token(token: str) -> bool:
     """
     if not token or not isinstance(token, str):
         return False
-    serializer = _get_serializer()
     try:
+        serializer = _get_serializer()
         data = serializer.loads(token, max_age=SESSION_MAX_AGE_SECONDS)
         return isinstance(data, dict) and data.get("authenticated") is True
-    except (BadSignature, SignatureExpired, Exception):
+    except (BadSignature, SignatureExpired, APIError, Exception):
         return False
 
 
@@ -97,3 +103,30 @@ def require_authentication(request: Request) -> bool:
             message="Authentication required.",
         )
     return True
+
+
+# -----------------------------------------------------------------------------
+# RAG Pipeline Dependency Management
+# -----------------------------------------------------------------------------
+
+_rag_pipeline_instance: Optional[Any] = None
+
+
+def get_rag_pipeline() -> Any:
+    """
+    FastAPI dependency returning singleton RAGPipeline instance.
+    Enforces shared in-memory vector store lifecycle across requests.
+    """
+    global _rag_pipeline_instance
+    if _rag_pipeline_instance is None:
+        from rag.pipeline import RAGPipeline
+        _rag_pipeline_instance = RAGPipeline()
+    return _rag_pipeline_instance
+
+
+def set_rag_pipeline(pipeline: Optional[Any]) -> None:
+    """
+    Injects or resets the active RAGPipeline instance (used for test isolation).
+    """
+    global _rag_pipeline_instance
+    _rag_pipeline_instance = pipeline

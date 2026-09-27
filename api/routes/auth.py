@@ -32,6 +32,12 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 async def login(req: LoginRequest, response: Response) -> LoginResponse:
     """Authenticates access key and sets secure session cookie."""
     expected_key = Config.get_app_access_key()
+    if not expected_key:
+        raise APIError(
+            status_code=500,
+            code="AUTH_CONFIGURATION_ERROR",
+            message="Application access key is not configured.",
+        )
 
     if not verify_access_key(req.access_key, expected_key):
         raise APIError(

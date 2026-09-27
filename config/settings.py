@@ -75,7 +75,7 @@ class Config:
     @classmethod
     def get_app_access_key(cls) -> str:
         """Returns application access key."""
-        return cls._get_val("APP_ACCESS_KEY", "admin123")
+        return cls._get_val("APP_ACCESS_KEY", "")
 
     @classmethod
     def get_ai_provider(cls) -> str:

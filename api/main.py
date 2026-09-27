@@ -17,7 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from api.dependencies import APIError, require_authentication
-from api.routes import auth, health, providers
+from api.routes import auth, documents, health, providers, rag
 from utils.security import sanitize_error_message
 
 
@@ -163,6 +163,8 @@ async def generic_exception_handler(request: Request, exc: Exception):
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(providers.router, prefix="/api/v1")
+app.include_router(documents.router, prefix="/api/v1")
+app.include_router(rag.router, prefix="/api/v1")
 
 
 # -----------------------------------------------------------------------------
