@@ -25,8 +25,9 @@ router = APIRouter(
 async def list_providers() -> ProvidersListResponse:
     """Returns safe metadata for all supported AI providers."""
     providers_list: List[ProviderMetadata] = []
+    supported_ids = get_supported_provider_ids()
 
-    for provider_id in get_supported_provider_ids():
+    for provider_id in supported_ids:
         provider = get_provider_by_id(provider_id)
         spec = Config.get_provider_spec(provider_id)
         dimension = spec.dimension if spec else 768
@@ -42,4 +43,14 @@ async def list_providers() -> ProvidersListResponse:
             )
         )
 
-    return ProvidersListResponse(providers=providers_list)
+    configured_provider = Config.get_ai_provider().strip().lower()
+    default_provider = (
+        configured_provider
+        if configured_provider in supported_ids
+        else "openai"
+    )
+
+    return ProvidersListResponse(
+        providers=providers_list,
+        default_provider=default_provider,
+    )

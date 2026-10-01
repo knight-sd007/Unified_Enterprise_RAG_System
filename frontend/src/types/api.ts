@@ -33,6 +33,7 @@ export interface ProviderMetadata {
 
 export interface ProvidersListResponse {
   providers: ProviderMetadata[];
+  default_provider: string;
 }
 
 export interface DocumentIngestResponse {

@@ -19,7 +19,7 @@ export const App: React.FC = () => {
   // System & Provider metadata
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [providers, setProviders] = useState<ProviderMetadata[]>([]);
-  const [selectedProvider, setSelectedProvider] = useState<string>('cohere');
+  const [selectedProvider, setSelectedProvider] = useState<string>('');
   const [stats, setStats] = useState<RAGStatsResponse | null>(null);
 
   // Document ingestion state
@@ -66,7 +66,10 @@ export const App: React.FC = () => {
       setProviders(providerList);
       setIsAuthenticated(true);
 
-      const defaultProv = providerList.length > 0 ? providerList[0].provider_id : 'cohere';
+      const defaultProv = (providerRes.default_provider || '').trim();
+      if (!defaultProv) {
+        throw new Error('Backend provider configuration error: default_provider is missing.');
+      }
       setSelectedProvider(defaultProv);
       await fetchStats(defaultProv);
     } catch (err: any) {
@@ -104,7 +107,10 @@ export const App: React.FC = () => {
       const providerRes = await apiClient.getProviders();
       const providerList = providerRes.providers || [];
       setProviders(providerList);
-      const defaultProv = providerList.length > 0 ? providerList[0].provider_id : 'cohere';
+      const defaultProv = (providerRes.default_provider || '').trim();
+      if (!defaultProv) {
+        throw new Error('Backend provider configuration error: default_provider is missing.');
+      }
       setSelectedProvider(defaultProv);
       await fetchStats(defaultProv);
       return true;

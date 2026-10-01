@@ -74,6 +74,46 @@ class TestAPIProviders(unittest.TestCase):
         self.assertNotIn("collection_name", raw_text)
         self.assertNotIn("p06_gemini_embedding_2_768", raw_text)
 
+    @patch("config.settings.Config.get_app_access_key", return_value="test-key")
+    @patch("config.settings.Config.get_ai_provider", return_value="openai")
+    def test_providers_default_provider_openai(self, _mock_provider, _mock_key):
+        """When AI_PROVIDER is openai, default_provider must be 'openai'."""
+        token = create_session_token()
+        response = self.client.get("/api/v1/providers", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["default_provider"], "openai")
+
+    @patch("config.settings.Config.get_app_access_key", return_value="test-key")
+    @patch("config.settings.Config.get_ai_provider", return_value="gemini")
+    def test_providers_default_provider_gemini(self, _mock_provider, _mock_key):
+        """When AI_PROVIDER is gemini, default_provider must be 'gemini'."""
+        token = create_session_token()
+        response = self.client.get("/api/v1/providers", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["default_provider"], "gemini")
+
+    @patch("config.settings.Config.get_app_access_key", return_value="test-key")
+    @patch("config.settings.Config.get_ai_provider", return_value="nvidia_nim")
+    def test_providers_default_provider_nvidia_nim(self, _mock_provider, _mock_key):
+        """When AI_PROVIDER is nvidia_nim, default_provider must be 'nvidia_nim'."""
+        token = create_session_token()
+        response = self.client.get("/api/v1/providers", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["default_provider"], "nvidia_nim")
+
+    @patch("config.settings.Config.get_app_access_key", return_value="test-key")
+    @patch("config.settings.Config.get_ai_provider", return_value="invalid_custom_provider")
+    def test_providers_default_provider_fallback_when_invalid(self, _mock_provider, _mock_key):
+        """When AI_PROVIDER is unconfigured/invalid, falls back safely to first supported provider."""
+        token = create_session_token()
+        response = self.client.get("/api/v1/providers", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["default_provider"], "openai")
+
 
 if __name__ == "__main__":
     unittest.main()

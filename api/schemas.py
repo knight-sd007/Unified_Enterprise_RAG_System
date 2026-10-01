@@ -65,6 +65,7 @@ class ProviderMetadata(BaseModel):
 class ProvidersListResponse(BaseModel):
     """Collection of available AI providers and their status."""
     providers: List[ProviderMetadata] = Field(..., description="List of supported AI providers.")
+    default_provider: str = Field(..., description="Configured default AI provider identifier.")
 
 
 # -----------------------------------------------------------------------------
