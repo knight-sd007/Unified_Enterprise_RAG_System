@@ -1,7 +1,7 @@
 # ==============================================================================
 # Multi-Stage Hardened Production Dockerfile for Unified Enterprise RAG System (P06)
 # Target Architecture: Linux amd64 / arm64 (OCI Ampere A1 Compatible)
-# Stage 1: Python Dependencies Builder (Debian 12 Bookworm Slim)
+# Stage 1: Python Dependencies Builder (Debian 13 Trixie Slim)
 # Stage 2: React Frontend Builder (Node.js 20 Slim)
 # Stage 3: Minimal Hardened Production Runner (Distroless Nonroot UID: 65532)
 # ==============================================================================
@@ -9,7 +9,7 @@
 # ------------------------------------------------------------------------------
 # Stage 1: Build Python Dependencies
 # ------------------------------------------------------------------------------
-FROM python:3.12-slim-bookworm AS python-builder
+FROM python:3.12-slim-trixie AS python-builder
 
 WORKDIR /build
 
@@ -25,7 +25,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi-dev \
     libbz2-1.0 \
     liblzma5 \
-    libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -47,9 +46,9 @@ RUN npm run build
 
 
 # ------------------------------------------------------------------------------
-# Stage 3: Hardened Minimal Production Runtime (Distroless C/C++ Debian 12)
+# Stage 3: Hardened Minimal Production Runtime (Distroless C/C++ Debian 13)
 # ------------------------------------------------------------------------------
-FROM gcr.io/distroless/cc-debian12:nonroot AS runner
+FROM gcr.io/distroless/cc-debian13:nonroot AS runner
 
 WORKDIR /app
 

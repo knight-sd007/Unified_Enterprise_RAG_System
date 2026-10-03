@@ -41,7 +41,7 @@ pipeline {
                 script {
                     echo "Running automated test suite in isolated Python 3.12 container..."
                     sh '''
-                        docker run --rm -v "${WORKSPACE}:/app" -w /app python:3.12-slim-bookworm sh -c "
+                        docker run --rm -v "${WORKSPACE}:/app" -w /app python:3.12-slim-trixie sh -c "
                             pip install --no-cache-dir -r requirements.txt &&
                             pytest -v
                         "
