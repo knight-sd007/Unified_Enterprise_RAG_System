@@ -1,12 +1,22 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiClient } from './services/api';
-import { ProviderMetadata, HealthResponse, RAGStatsResponse, DocumentIngestResponse, QueryResponse } from './types/api';
+import {
+  ProviderMetadata,
+  HealthResponse,
+  RAGStatsResponse,
+  DocumentIngestResponse,
+  QueryResponse,
+  DocumentItem,
+  ProviderHealthItem,
+} from './types/api';
 import { Header } from './components/Header';
 import { TelemetryHUD } from './components/TelemetryHUD';
+import { ModelSelector } from './components/ModelSelector';
 import { KnowledgePane } from './components/KnowledgePane';
 import { GroundedQAPane } from './components/GroundedQAPane';
 import { DiagnosticsModal } from './components/DiagnosticsModal';
 import { ClearIndexModal } from './components/ClearIndexModal';
+import { AdminConsoleModal } from './components/AdminConsoleModal';
 import { LoginModal } from './components/LoginModal';
 import { Loader2 } from 'lucide-react';
 
@@ -15,16 +25,26 @@ export const App: React.FC = () => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<string>('default_user');
+  const [currentRole, setCurrentRole] = useState<string>('user');
 
   // System & Provider metadata
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [providers, setProviders] = useState<ProviderMetadata[]>([]);
   const [selectedProvider, setSelectedProvider] = useState<string>('');
+  const [providerHealthList, setProviderHealthList] = useState<ProviderHealthItem[]>([]);
   const [stats, setStats] = useState<RAGStatsResponse | null>(null);
 
-  // Document ingestion state
-  const [ingestedFiles, setIngestedFiles] = useState<string[]>([]);
+  // Decoupled Model Selection state
+  const [chatProviderId, setChatProviderId] = useState<string>('');
+  const [chatModel, setChatModel] = useState<string>('');
+  const [embeddingProviderId, setEmbeddingProviderId] = useState<string>('');
+  const [embeddingModel, setEmbeddingModel] = useState<string>('');
+
+  // Document ingestion and inventory state
+  const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [isIngesting, setIsIngesting] = useState<boolean>(false);
+  const [isDeletingDocId, setIsDeletingDocId] = useState<string | null>(null);
   const [ingestResult, setIngestResult] = useState<DocumentIngestResponse | null>(null);
   const [ingestError, setIngestError] = useState<string | null>(null);
 
@@ -37,6 +57,7 @@ export const App: React.FC = () => {
   // Modals
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState<boolean>(false);
   const [isClearModalOpen, setIsClearModalOpen] = useState<boolean>(false);
+  const [isAdminConsoleOpen, setIsAdminConsoleOpen] = useState<boolean>(false);
   const [isClearing, setIsClearing] = useState<boolean>(false);
 
   // Fetch telemetry & vector index stats for the active provider
@@ -45,74 +66,127 @@ export const App: React.FC = () => {
       const statsRes = await apiClient.getRAGStats(providerId);
       setStats(statsRes);
     } catch {
-      // If unauthorized or error, silently pass
+      // Pass
+    }
+  }, []);
+
+  // Fetch documents owned by the current authenticated user for active provider
+  const fetchDocuments = useCallback(async (providerId: string) => {
+    try {
+      const docRes = await apiClient.listDocuments(providerId);
+      setDocuments(docRes.documents || []);
+    } catch {
+      // Pass
+    }
+  }, []);
+
+  // Fetch provider health diagnostics
+  const fetchProviderHealth = useCallback(async () => {
+    try {
+      const res = await apiClient.getProvidersHealth();
+      setProviderHealthList(res.providers || []);
+    } catch {
+      // Pass
     }
   }, []);
 
   // Check health and bootstrap system
   const bootstrapSystem = useCallback(async () => {
     try {
-      // 1. Fetch public health status
-      const healthRes = await apiClient.getHealth();
-      setHealth(healthRes);
-    } catch (err) {
-      console.error('Health check failed:', err);
-    }
+      const [healthRes, authStatus] = await Promise.all([
+        apiClient.getHealth().catch(() => null),
+        apiClient.getAuthStatus().catch(() => null),
+      ]);
 
-    try {
-      // 2. Fetch authenticated providers list
-      const providerRes = await apiClient.getProviders();
-      const providerList = providerRes.providers || [];
-      setProviders(providerList);
-      setIsAuthenticated(true);
+      if (healthRes) setHealth(healthRes);
 
-      const defaultProv = (providerRes.default_provider || '').trim();
-      if (!defaultProv) {
-        throw new Error('Backend provider configuration error: default_provider is missing.');
-      }
-      setSelectedProvider(defaultProv);
-      await fetchStats(defaultProv);
-    } catch (err: any) {
-      if (err.status === 401) {
-        setIsAuthenticated(false);
+      if (authStatus?.authenticated) {
+        setIsAuthenticated(true);
+        if (authStatus.user_id) setCurrentUser(authStatus.user_id);
+        if (authStatus.role) setCurrentRole(authStatus.role);
+
+        const providerRes = await apiClient.getProviders();
+        const providerList = providerRes.providers || [];
+        setProviders(providerList);
+
+        const defaultProv = (providerRes.default_provider || providerList[0]?.provider_id || 'openai').trim();
+        setSelectedProvider(defaultProv);
+
+        const activeProvObj = providerList.find((p) => p.provider_id === defaultProv) || providerList[0];
+        setChatProviderId(defaultProv);
+        setChatModel(activeProvObj?.chat_model || '');
+        setEmbeddingProviderId(defaultProv);
+        setEmbeddingModel(activeProvObj?.embedding_model || '');
+
+        await Promise.all([
+          fetchStats(defaultProv),
+          fetchDocuments(defaultProv),
+          fetchProviderHealth(),
+        ]);
       } else {
-        console.error('Provider fetch failed:', err);
+        setIsAuthenticated(false);
       }
+    } catch (err) {
+      console.error('Bootstrap error:', err);
     } finally {
       setIsAuthChecking(false);
     }
-  }, [fetchStats]);
+  }, [fetchStats, fetchDocuments, fetchProviderHealth]);
 
+  // Check OAuth callback in URL on mount
   useEffect(() => {
-    bootstrapSystem();
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const state = params.get('state');
+
+    if (code) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      apiClient
+        .googleOAuthCallback(code, state || undefined)
+        .then((loginRes) => {
+          setIsAuthenticated(true);
+          if (loginRes.user_id) setCurrentUser(loginRes.user_id);
+          if (loginRes.role) setCurrentRole(loginRes.role);
+          bootstrapSystem();
+        })
+        .catch((err) => {
+          setLoginError(err.message || 'Google OAuth exchange failed.');
+          setIsAuthChecking(false);
+        });
+    } else {
+      bootstrapSystem();
+    }
   }, [bootstrapSystem]);
 
   // Handle provider selection change
   const handleSelectProvider = async (providerId: string) => {
     setSelectedProvider(providerId);
+    setEmbeddingProviderId(providerId);
+    setChatProviderId(providerId);
+
+    const provObj = providers.find((p) => p.provider_id === providerId);
+    if (provObj) {
+      setChatModel(provObj.chat_model);
+      setEmbeddingModel(provObj.embedding_model);
+    }
+
     setIngestResult(null);
     setIngestError(null);
     setQueryResult(null);
     setQueryError(null);
-    await fetchStats(providerId);
+    await Promise.all([fetchStats(providerId), fetchDocuments(providerId), fetchProviderHealth()]);
   };
 
   // Handle Login submission
-  const handleLogin = async (accessKey: string): Promise<boolean> => {
+  const handleLogin = async (accessKey: string, username?: string): Promise<boolean> => {
     setLoginError(null);
     try {
-      await apiClient.login(accessKey);
+      const loginRes = await apiClient.login(accessKey, username);
       setIsAuthenticated(true);
-      // Bootstrap system after successful auth
-      const providerRes = await apiClient.getProviders();
-      const providerList = providerRes.providers || [];
-      setProviders(providerList);
-      const defaultProv = (providerRes.default_provider || '').trim();
-      if (!defaultProv) {
-        throw new Error('Backend provider configuration error: default_provider is missing.');
-      }
-      setSelectedProvider(defaultProv);
-      await fetchStats(defaultProv);
+      if (loginRes.user_id) setCurrentUser(loginRes.user_id);
+      if (loginRes.role) setCurrentRole(loginRes.role);
+
+      await bootstrapSystem();
       return true;
     } catch (err: any) {
       setLoginError(err.message || 'Authentication failed. Please verify your access key.');
@@ -128,10 +202,12 @@ export const App: React.FC = () => {
       // ignore
     } finally {
       setIsAuthenticated(false);
+      setCurrentUser('default_user');
+      setCurrentRole('user');
+      setDocuments([]);
       setStats(null);
       setQueryResult(null);
       setIngestResult(null);
-      setIngestedFiles([]);
     }
   };
 
@@ -146,19 +222,31 @@ export const App: React.FC = () => {
     setIngestResult(null);
 
     try {
-      const res = await apiClient.ingestDocuments(files, selectedProvider, chunkSize, chunkOverlap);
+      const res = await apiClient.ingestDocuments(files, embeddingProviderId || selectedProvider, chunkSize, chunkOverlap);
       setIngestResult(res);
-      // Track ingested files
-      const newFileNames = files.map((f) => f.name);
-      setIngestedFiles((prev) => Array.from(new Set([...prev, ...newFileNames])));
-      // Refresh telemetry
-      await fetchStats(selectedProvider);
+      await Promise.all([fetchStats(selectedProvider), fetchDocuments(selectedProvider)]);
       return res;
     } catch (err: any) {
       setIngestError(err.message || 'Document ingestion failed.');
       return null;
     } finally {
       setIsIngesting(false);
+    }
+  };
+
+  // Handle Single Document Deletion
+  const handleDeleteDocument = async (docId: string, filename: string) => {
+    if (!window.confirm(`Are you sure you want to delete "${filename}" and all its vector chunks?`)) {
+      return;
+    }
+    setIsDeletingDocId(docId);
+    try {
+      await apiClient.deleteDocument(docId, selectedProvider);
+      await Promise.all([fetchDocuments(selectedProvider), fetchStats(selectedProvider)]);
+    } catch (err: any) {
+      alert(`Failed to delete document: ${err.message || 'Unknown error'}`);
+    } finally {
+      setIsDeletingDocId(null);
     }
   };
 
@@ -176,7 +264,11 @@ export const App: React.FC = () => {
     try {
       const res = await apiClient.queryRAG({
         query,
-        provider: selectedProvider,
+        provider_id: selectedProvider,
+        chat_provider_id: chatProviderId || selectedProvider,
+        chat_model: chatModel || undefined,
+        embedding_provider_id: embeddingProviderId || selectedProvider,
+        embedding_model: embeddingModel || undefined,
         top_k: topK,
         similarity_threshold: similarityThreshold,
       });
@@ -190,18 +282,18 @@ export const App: React.FC = () => {
     }
   };
 
-  // Handle Index Clear
+  // Handle User-Scoped Document Clear
   const handleConfirmClear = async () => {
     setIsClearing(true);
     try {
-      await apiClient.clearIndex(selectedProvider);
-      setIngestedFiles([]);
+      await apiClient.clearUserDocuments(selectedProvider);
+      setDocuments([]);
       setIngestResult(null);
       setQueryResult(null);
       setIsClearModalOpen(false);
       await fetchStats(selectedProvider);
     } catch (err: any) {
-      alert(`Failed to clear index: ${err.message || 'Internal error'}`);
+      alert(`Failed to clear documents: ${err.message || 'Internal error'}`);
     } finally {
       setIsClearing(false);
     }
@@ -231,8 +323,11 @@ export const App: React.FC = () => {
         selectedProvider={selectedProvider}
         onSelectProvider={handleSelectProvider}
         onOpenDiagnostics={() => setIsDiagnosticsOpen(true)}
+        onOpenAdminConsole={() => setIsAdminConsoleOpen(true)}
         onLogout={handleLogout}
-        systemStatus={health?.status || 'HEALTHY'}
+        providerHealthList={providerHealthList}
+        currentUser={currentUser}
+        currentRole={currentRole}
       />
 
       {/* Main Operational Workspace */}
@@ -241,8 +336,29 @@ export const App: React.FC = () => {
         <TelemetryHUD
           stats={stats}
           providerMeta={activeMeta}
-          documentCount={ingestedFiles.length}
+          documentCount={documents.length}
         />
+
+        {/* Decoupled Model & Vector Space Execution Controller */}
+        {providers.length > 0 && (
+          <ModelSelector
+            providers={providers}
+            chatProviderId={chatProviderId || selectedProvider}
+            chatModel={chatModel}
+            onSelectChatProvider={(pId, m) => {
+              setChatProviderId(pId);
+              setChatModel(m);
+            }}
+            onSelectChatModel={setChatModel}
+            embeddingProviderId={embeddingProviderId || selectedProvider}
+            embeddingModel={embeddingModel}
+            onSelectEmbeddingProvider={(pId, m) => {
+              setEmbeddingProviderId(pId);
+              setEmbeddingModel(m);
+            }}
+            onSelectEmbeddingModel={setEmbeddingModel}
+          />
+        )}
 
         {/* Dual-Pane Core Operational Interface */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -250,12 +366,15 @@ export const App: React.FC = () => {
           <div className="lg:col-span-5">
             <KnowledgePane
               activeProvider={activeMeta}
-              ingestedFiles={ingestedFiles}
+              documents={documents}
               isIngesting={isIngesting}
               onIngest={handleIngest}
+              onDeleteDocument={handleDeleteDocument}
               onOpenClearModal={() => setIsClearModalOpen(true)}
               ingestResult={ingestResult}
               ingestError={ingestError}
+              currentUser={currentUser}
+              isDeletingDocId={isDeletingDocId}
             />
           </div>
 
@@ -279,7 +398,7 @@ export const App: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span>Unified Enterprise RAG System &bull; Portfolio P06</span>
           <span className="font-mono text-[11px] text-slate-400">
-            FastAPI Authoritative Core &bull; React + Vite Frontend
+            FastAPI Authoritative Core &bull; Multi-User Vector Isolation &bull; React + Vite Frontend
           </span>
         </div>
       </footer>
@@ -293,12 +412,23 @@ export const App: React.FC = () => {
         providerMeta={activeMeta}
       />
 
+      {/* Admin Console Modal */}
+      <AdminConsoleModal
+        isOpen={isAdminConsoleOpen}
+        onClose={() => setIsAdminConsoleOpen(false)}
+        onPurgeSuccess={() => {
+          fetchStats(selectedProvider);
+          fetchDocuments(selectedProvider);
+        }}
+      />
+
       {/* Clear Vector Index Modal */}
       <ClearIndexModal
         isOpen={isClearModalOpen}
         onClose={() => setIsClearModalOpen(false)}
         onConfirm={handleConfirmClear}
         activeProvider={activeMeta}
+        currentUser={currentUser}
         isClearing={isClearing}
       />
     </div>

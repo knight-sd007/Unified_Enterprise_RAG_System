@@ -1,13 +1,23 @@
 import {
+  AdminDiagnosticsResponse,
+  AdminOverviewResponse,
+  AdminVectorClearResponse,
   AuthStatusResponse,
   ClearIndexResponse,
+  DocumentDeleteResponse,
   DocumentIngestResponse,
+  DocumentListResponse,
+  GoogleAuthConfigResponse,
+  GoogleAuthUrlResponse,
   HealthResponse,
   LoginResponse,
   LogoutResponse,
+  ProvidersHealthResponse,
   ProvidersListResponse,
+  QueryRequestPayload,
   QueryResponse,
   RAGStatsResponse,
+  UserClearResponse,
 } from '../types/api';
 
 class ApiClient {
@@ -64,15 +74,40 @@ class ApiClient {
     return this.request<HealthResponse>('/api/v1/health');
   }
 
+  async getProvidersHealth(): Promise<ProvidersHealthResponse> {
+    return this.request<ProvidersHealthResponse>('/api/v1/health/providers');
+  }
+
   // Authentication
   async getAuthStatus(): Promise<AuthStatusResponse> {
     return this.request<AuthStatusResponse>('/api/v1/auth/status');
   }
 
-  async login(accessKey: string): Promise<LoginResponse> {
+  async login(accessKey: string, username?: string): Promise<LoginResponse> {
     return this.request<LoginResponse>('/api/v1/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ access_key: accessKey }),
+      body: JSON.stringify({
+        access_key: accessKey,
+        ...(username ? { username: username.trim() } : {}),
+      }),
+    });
+  }
+
+  async getGoogleAuthConfig(): Promise<GoogleAuthConfigResponse> {
+    return this.request<GoogleAuthConfigResponse>('/api/v1/auth/google/config');
+  }
+
+  async getGoogleAuthUrl(): Promise<GoogleAuthUrlResponse> {
+    return this.request<GoogleAuthUrlResponse>('/api/v1/auth/google/url');
+  }
+
+  async googleOAuthCallback(code: string, state?: string): Promise<LoginResponse> {
+    return this.request<LoginResponse>('/api/v1/auth/google/callback', {
+      method: 'POST',
+      body: JSON.stringify({
+        code,
+        ...(state ? { state } : {}),
+      }),
     });
   }
 
@@ -87,7 +122,7 @@ class ApiClient {
     return this.request<ProvidersListResponse>('/api/v1/providers');
   }
 
-  // Documents
+  // Document Ingestion & Lifecycle Management
   async ingestDocuments(
     files: File[],
     providerId?: string,
@@ -108,23 +143,30 @@ class ApiClient {
     });
   }
 
+  async listDocuments(providerId?: string): Promise<DocumentListResponse> {
+    const query = providerId ? `?provider_id=${encodeURIComponent(providerId)}` : '';
+    return this.request<DocumentListResponse>(`/api/v1/documents${query}`);
+  }
+
+  async deleteDocument(docId: string, providerId?: string): Promise<DocumentDeleteResponse> {
+    const query = providerId ? `?provider_id=${encodeURIComponent(providerId)}` : '';
+    return this.request<DocumentDeleteResponse>(`/api/v1/documents/${encodeURIComponent(docId)}${query}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async clearUserDocuments(providerId?: string): Promise<UserClearResponse> {
+    const query = providerId ? `?provider_id=${encodeURIComponent(providerId)}` : '';
+    return this.request<UserClearResponse>(`/api/v1/documents${query}`, {
+      method: 'DELETE',
+    });
+  }
+
   // RAG Operations
-  async queryRAG(params: {
-    query: string;
-    provider?: string;
-    provider_id?: string;
-    top_k?: number;
-    similarity_threshold?: number;
-  }): Promise<QueryResponse> {
-    const payload: Record<string, any> = {
-      query: params.query,
-      provider: params.provider || params.provider_id,
-      top_k: params.top_k,
-      similarity_threshold: params.similarity_threshold,
-    };
+  async queryRAG(params: QueryRequestPayload): Promise<QueryResponse> {
     return this.request<QueryResponse>('/api/v1/rag/query', {
       method: 'POST',
-      body: JSON.stringify(payload),
+      body: JSON.stringify(params),
     });
   }
 
@@ -133,6 +175,26 @@ class ApiClient {
     return this.request<RAGStatsResponse>(`/api/v1/rag/stats${query}`);
   }
 
+  // Admin Console Endpoints
+  async getAdminOverview(): Promise<AdminOverviewResponse> {
+    return this.request<AdminOverviewResponse>('/api/v1/admin/overview');
+  }
+
+  async getAdminDiagnostics(): Promise<AdminDiagnosticsResponse> {
+    return this.request<AdminDiagnosticsResponse>('/api/v1/admin/diagnostics');
+  }
+
+  async adminClearVectors(confirmation: string, providerId?: string): Promise<AdminVectorClearResponse> {
+    return this.request<AdminVectorClearResponse>('/api/v1/admin/vectors/clear', {
+      method: 'POST',
+      body: JSON.stringify({
+        confirmation,
+        ...(providerId ? { provider_id: providerId } : {}),
+      }),
+    });
+  }
+
+  // Legacy Admin Wipe Index
   async clearIndex(providerId?: string): Promise<ClearIndexResponse> {
     const query = providerId ? `?provider_id=${encodeURIComponent(providerId)}` : '';
     return this.request<ClearIndexResponse>(`/api/v1/rag/index${query}`, {

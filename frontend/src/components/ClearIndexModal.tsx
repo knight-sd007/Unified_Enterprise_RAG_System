@@ -7,6 +7,7 @@ interface ClearIndexModalProps {
   onClose: () => void;
   onConfirm: () => Promise<void>;
   activeProvider: ProviderMetadata | undefined;
+  currentUser?: string;
   isClearing: boolean;
 }
 
@@ -15,6 +16,7 @@ export const ClearIndexModal: React.FC<ClearIndexModalProps> = ({
   onClose,
   onConfirm,
   activeProvider,
+  currentUser = 'default_user',
   isClearing,
 }) => {
   if (!isOpen) return null;
@@ -25,7 +27,7 @@ export const ClearIndexModal: React.FC<ClearIndexModalProps> = ({
         <div className="px-5 py-4 border-b border-border-card flex items-center justify-between bg-surface-2/40">
           <div className="flex items-center gap-2 text-red-400">
             <AlertTriangle className="w-5 h-5" />
-            <h3 className="text-sm font-bold text-slate-100">Clear Vector Index Session</h3>
+            <h3 className="text-sm font-bold text-slate-100">Clear User Documents</h3>
           </div>
           <button
             onClick={onClose}
@@ -38,12 +40,12 @@ export const ClearIndexModal: React.FC<ClearIndexModalProps> = ({
 
         <div className="p-5 space-y-3 text-xs text-slate-300">
           <p>
-            Are you sure you want to clear the vector index for{' '}
-            <strong className="text-slate-100">{activeProvider?.name || 'the active provider'}</strong>?
+            Are you sure you want to remove all indexed documents for user{' '}
+            <strong className="text-sky-300 font-mono">{currentUser}</strong> in the{' '}
+            <strong className="text-slate-100">{activeProvider?.name || 'active provider'}</strong> vector space?
           </p>
           <div className="p-3 bg-red-950/30 border border-red-900/40 rounded-lg text-[11px] text-red-300">
-            This action will delete all indexed embedding points in the active vector space.
-            The underlying Qdrant collection routing and dimension isolation remain intact.
+            This action will permanently delete all vector points and document records owned by your identity. Other users' documents and the underlying provider collection remain completely unaffected.
           </div>
         </div>
 
@@ -63,12 +65,12 @@ export const ClearIndexModal: React.FC<ClearIndexModalProps> = ({
             {isClearing ? (
               <>
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>Clearing...</span>
+                <span>Clearing Documents...</span>
               </>
             ) : (
               <>
                 <Trash2 className="w-3.5 h-3.5" />
-                <span>Confirm Clear Index</span>
+                <span>Confirm Clear Documents</span>
               </>
             )}
           </button>

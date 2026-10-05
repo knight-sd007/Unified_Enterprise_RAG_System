@@ -13,7 +13,12 @@ class TestAPIProviders(unittest.TestCase):
     """Test suite for /api/v1/providers endpoint."""
 
     def setUp(self):
+        self.signing_patcher = patch("config.settings.Config.get_session_signing_key", return_value="test-signing-key-789")
+        self.signing_patcher.start()
         self.client = TestClient(app)
+
+    def tearDown(self):
+        self.signing_patcher.stop()
 
     def test_providers_unauthenticated_rejected(self):
         """GET /api/v1/providers without credentials must return 401 UNAUTHORIZED."""

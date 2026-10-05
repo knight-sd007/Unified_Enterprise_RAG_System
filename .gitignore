@@ -30,6 +30,9 @@ wheels/
 .env.*.local
 *.pem
 *.key
+data/*.db
+*.sqlite
+*.sqlite3
 
 # Node and Frontend
 node_modules/

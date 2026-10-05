@@ -8,7 +8,7 @@ Resolves settings dynamically from:
 
 import os
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 try:
     from dotenv import load_dotenv
@@ -53,6 +53,28 @@ PROVIDER_VECTOR_SPECS: Dict[str, ProviderVectorSpec] = {
 }
 
 
+# Supported Chat and Embedding Model Catalogs
+SUPPORTED_CHAT_MODELS: Dict[str, List[str]] = {
+    "openai": ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"],
+    "gemini": ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash"],
+    "nvidia_nim": ["nvidia/nemotron-3-super-120b-a12b", "meta/llama-3.1-8b-instruct", "meta/llama-3.1-70b-instruct"],
+}
+
+SUPPORTED_EMBEDDING_MODELS: Dict[str, List[Dict[str, Any]]] = {
+    "gemini": [
+        {"model": "gemini-embedding-2", "dimension": 768},
+        {"model": "text-embedding-004", "dimension": 768},
+    ],
+    "nvidia_nim": [
+        {"model": "nvidia/llama-nemotron-embed-1b-v2", "dimension": 2048},
+    ],
+    "openai": [
+        {"model": "text-embedding-3-small", "dimension": 1536},
+        {"model": "text-embedding-ada-002", "dimension": 1536},
+    ],
+}
+
+
 class Config:
     """Centralized configuration manager providing type-safe settings retrieval."""
 
@@ -63,9 +85,27 @@ class Config:
         return str(val).strip() if val is not None else default
 
     @classmethod
+    def get_environment(cls) -> str:
+        """Returns runtime environment mode ('production', 'development', etc.)."""
+        return cls._get_val("ENVIRONMENT", "production")
+
+    @classmethod
     def get_app_access_key(cls) -> str:
         """Returns application access key."""
         return cls._get_val("APP_ACCESS_KEY", "")
+
+    @classmethod
+    def get_admin_access_key(cls) -> str:
+        """Returns administrative access key."""
+        return cls._get_val("ADMIN_ACCESS_KEY", "")
+
+    @classmethod
+    def get_session_signing_key(cls) -> str:
+        """
+        Returns dedicated session signing key used for cryptographic session token serialization.
+        Must be a high-entropy secret distinct from APP_ACCESS_KEY and ADMIN_ACCESS_KEY.
+        """
+        return cls._get_val("SESSION_SIGNING_KEY", "")
 
     @classmethod
     def get_ai_provider(cls) -> str:
@@ -141,6 +181,19 @@ class Config:
         """Checks if Qdrant URL and API key are configured."""
         return bool(cls.get_qdrant_url() and cls.get_qdrant_api_key())
 
+    @classmethod
+    def get_qdrant_host(cls) -> Optional[str]:
+        """Returns sanitized Qdrant host without credentials."""
+        url = cls.get_qdrant_url()
+        if not url:
+            return None
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            return parsed.netloc or parsed.path
+        except Exception:
+            return "configured"
+
     # Provider Readiness Helpers
     @classmethod
     def is_openai_configured(cls) -> bool:
@@ -166,3 +219,53 @@ class Config:
     def get_all_provider_specs(cls) -> Dict[str, ProviderVectorSpec]:
         """Returns all registered provider vector specifications."""
         return dict(PROVIDER_VECTOR_SPECS)
+
+    # Google OAuth 2.0 / OpenID Connect Settings
+    @classmethod
+    def get_google_client_id(cls) -> str:
+        """Returns Google OAuth Client ID."""
+        return cls._get_val("GOOGLE_CLIENT_ID", "")
+
+    @classmethod
+    def get_google_client_secret(cls) -> str:
+        """Returns Google OAuth Client Secret."""
+        return cls._get_val("GOOGLE_CLIENT_SECRET", "")
+
+    @classmethod
+    def get_google_redirect_uri(cls) -> str:
+        """Returns Google OAuth Redirect Callback URI."""
+        return cls._get_val("GOOGLE_REDIRECT_URI", "https://rag.vaikuntrix.in/api/v1/auth/google/callback")
+
+    @classmethod
+    def get_google_admin_emails(cls) -> list[str]:
+        """Returns list of trusted Google account emails with administrator privileges."""
+        raw = cls._get_val("GOOGLE_ADMIN_EMAILS", "")
+        return [e.strip().lower() for e in raw.split(",") if e.strip()]
+
+    @classmethod
+    def get_google_admin_subs(cls) -> list[str]:
+        """Returns list of trusted Google account subject IDs (sub) with administrator privileges."""
+        raw = cls._get_val("GOOGLE_ADMIN_SUBS", "")
+        return [s.strip() for s in raw.split(",") if s.strip()]
+
+    @classmethod
+    def is_google_oauth_configured(cls) -> bool:
+        """Checks if Google OAuth is configured."""
+        return bool(cls.get_google_client_id() and cls.get_google_client_secret())
+
+    # Metadata & Token Persistence Settings
+    @classmethod
+    def get_metadata_db_path(cls) -> str:
+        """Returns SQLite database path for persistent document metadata & encrypted tokens."""
+        default_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "p06_metadata.db")
+        return cls._get_val("METADATA_DB_PATH", default_path)
+
+    @classmethod
+    def get_supported_chat_models(cls, provider_id: str) -> list[str]:
+        """Returns approved chat completion models for provider."""
+        return SUPPORTED_CHAT_MODELS.get(provider_id.strip().lower(), [])
+
+    @classmethod
+    def get_supported_embedding_models(cls, provider_id: str) -> list[dict[str, Any]]:
+        """Returns approved embedding models and specs for provider."""
+        return SUPPORTED_EMBEDDING_MODELS.get(provider_id.strip().lower(), [])

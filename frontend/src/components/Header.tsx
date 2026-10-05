@@ -1,14 +1,17 @@
 import React from 'react';
-import { Activity, LogOut, Cpu, Database } from 'lucide-react';
-import { ProviderMetadata } from '../types/api';
+import { Activity, LogOut, Cpu, Database, UserCheck, ShieldAlert, Shield } from 'lucide-react';
+import { ProviderHealthItem, ProviderMetadata } from '../types/api';
 
 interface HeaderProps {
   providers: ProviderMetadata[];
   selectedProvider: string;
   onSelectProvider: (providerId: string) => void;
   onOpenDiagnostics: () => void;
+  onOpenAdminConsole?: () => void;
   onLogout: () => void;
-  systemStatus: string;
+  providerHealthList: ProviderHealthItem[];
+  currentUser?: string;
+  currentRole?: string;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -16,9 +19,20 @@ export const Header: React.FC<HeaderProps> = ({
   selectedProvider,
   onSelectProvider,
   onOpenDiagnostics,
+  onOpenAdminConsole,
   onLogout,
-  systemStatus,
+  providerHealthList,
+  currentUser = 'default_user',
+  currentRole = 'user',
 }) => {
+  const isAdmin = currentRole === 'admin';
+  const activeHealth = providerHealthList.find((h) => h.provider_id === selectedProvider);
+  const activeProvider = providers.find((p) => p.provider_id === selectedProvider);
+
+  const isConnected = activeHealth ? activeHealth.status === 'connected' : activeProvider?.configured;
+  const isNotConfigured = activeHealth ? activeHealth.status === 'not_configured' : !activeProvider?.configured;
+  const isGoogleUser = currentUser.startsWith('google_');
+
   return (
     <header className="bg-surface-1 border-b border-border-card sticky top-0 z-30 shadow-sm">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -61,11 +75,64 @@ export const Header: React.FC<HeaderProps> = ({
             </select>
           </div>
 
-          {/* Operational Status Pill */}
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 text-xs font-semibold">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span>{systemStatus}</span>
+          {/* User Identity Badge */}
+          <div
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-mono font-medium ${
+              isAdmin
+                ? 'bg-amber-950/40 border-amber-500/40 text-amber-300'
+                : 'bg-surface-2 border-border-card text-slate-300'
+            }`}
+            title={`Logged in as ${currentUser} (${currentRole})${isGoogleUser ? ' via Google OAuth' : ''}`}
+          >
+            {isAdmin ? (
+              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+            ) : (
+              <UserCheck className="w-3.5 h-3.5 text-sky-400" />
+            )}
+            <span className="max-w-[120px] truncate">{currentUser}</span>
+            {isAdmin && <span className="text-[10px] uppercase font-bold text-amber-400">[Admin]</span>}
           </div>
+
+          {/* Accurate Provider Health Pill */}
+          <div
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold ${
+              isConnected
+                ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400'
+                : isNotConfigured
+                ? 'bg-amber-950/40 border-amber-500/30 text-amber-400'
+                : 'bg-red-950/40 border-red-500/30 text-red-400'
+            }`}
+            title={activeHealth?.message || (isConnected ? 'Provider is configured and ready' : 'Provider is not configured')}
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                isConnected
+                  ? 'bg-emerald-400 animate-pulse'
+                  : isNotConfigured
+                  ? 'bg-amber-400'
+                  : 'bg-red-400'
+              }`}
+            />
+            <span>
+              {isConnected
+                ? 'Connected'
+                : isNotConfigured
+                ? 'Not Configured'
+                : 'Unreachable'}
+            </span>
+          </div>
+
+          {/* Admin Console Trigger (Admins Only) */}
+          {isAdmin && onOpenAdminConsole && (
+            <button
+              onClick={onOpenAdminConsole}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-950/40 hover:bg-amber-900/50 border border-amber-500/40 text-xs font-semibold text-amber-300 hover:text-amber-200 transition-colors shadow-sm"
+              title="Open Admin Console"
+            >
+              <Shield className="w-3.5 h-3.5 text-amber-400" />
+              <span>Admin Console</span>
+            </button>
+          )}
 
           {/* Diagnostics Modal Button */}
           <button

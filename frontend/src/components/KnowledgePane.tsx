@@ -1,25 +1,31 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, File, Trash2, CheckCircle2, AlertTriangle, Loader2, Sliders } from 'lucide-react';
-import { DocumentIngestResponse, ProviderMetadata } from '../types/api';
+import { UploadCloud, File, Trash2, CheckCircle2, AlertTriangle, Loader2, Sliders, Calendar, Layers } from 'lucide-react';
+import { DocumentIngestResponse, DocumentItem, ProviderMetadata } from '../types/api';
 
 interface KnowledgePaneProps {
   activeProvider: ProviderMetadata | undefined;
-  ingestedFiles: string[];
+  documents: DocumentItem[];
   isIngesting: boolean;
   onIngest: (files: File[], chunkSize: number, chunkOverlap: number) => Promise<DocumentIngestResponse | null>;
+  onDeleteDocument: (docId: string, filename: string) => Promise<void>;
   onOpenClearModal: () => void;
   ingestResult: DocumentIngestResponse | null;
   ingestError: string | null;
+  currentUser?: string;
+  isDeletingDocId?: string | null;
 }
 
 export const KnowledgePane: React.FC<KnowledgePaneProps> = ({
   activeProvider,
-  ingestedFiles,
+  documents,
   isIngesting,
   onIngest,
+  onDeleteDocument,
   onOpenClearModal,
   ingestResult,
   ingestError,
+  currentUser = 'default_user',
+  isDeletingDocId = null,
 }) => {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [chunkSize, setChunkSize] = useState<number>(500);
@@ -51,6 +57,20 @@ export const KnowledgePane: React.FC<KnowledgePaneProps> = ({
     }
   };
 
+  const formatDate = (isoString: string) => {
+    try {
+      const date = new Date(isoString);
+      return date.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    } catch {
+      return isoString;
+    }
+  };
+
   return (
     <div className="bg-surface-1 border border-border-card rounded-xl p-5 flex flex-col h-full shadow-sm">
       <div className="flex items-center justify-between border-b border-border-card pb-3 mb-4">
@@ -60,17 +80,17 @@ export const KnowledgePane: React.FC<KnowledgePaneProps> = ({
             Knowledge Operations
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Targeting <span className="text-slate-200 font-medium">{activeProvider?.name || 'Active Provider'}</span> vector space &bull; PDF / TXT
+            Targeting <span className="text-slate-200 font-medium">{activeProvider?.name || 'Active Provider'}</span> vector space &bull; Scoped to <span className="font-mono text-sky-300">{currentUser}</span>
           </p>
         </div>
-        {ingestedFiles.length > 0 && (
+        {documents.length > 0 && (
           <button
             onClick={onOpenClearModal}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-red-950/20 hover:bg-red-950/40 border border-red-900/40 text-red-400 hover:text-red-300 text-xs font-medium transition-colors"
-            title="Clear active provider vector space"
+            title="Clear all documents owned by you"
           >
             <Trash2 className="w-3.5 h-3.5" />
-            <span>Clear Index</span>
+            <span>Clear My Docs</span>
           </button>
         )}
       </div>
@@ -198,7 +218,7 @@ export const KnowledgePane: React.FC<KnowledgePaneProps> = ({
           <div>
             <div className="font-semibold">Ingestion Successful</div>
             <div className="text-[11px] text-emerald-400/90 mt-0.5">
-              Indexed {ingestResult.document_count} doc(s) into {ingestResult.chunk_count} vector chunks via {ingestResult.provider} ({ingestResult.vector_dimension}d).
+              Indexed {ingestResult.document_count} doc(s) into {ingestResult.chunk_count} vector chunks via {ingestResult.provider} ({ingestResult.vector_dimension}d) bound to {currentUser}.
             </div>
           </div>
         </div>
@@ -217,27 +237,76 @@ export const KnowledgePane: React.FC<KnowledgePaneProps> = ({
       {/* Tracked Ingested Documents Inventory */}
       <div className="mt-6 pt-4 border-t border-border-card flex-1 flex flex-col min-h-0">
         <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2.5 flex items-center justify-between">
-          <span>Indexed Document Inventory</span>
-          <span className="text-[11px] font-mono text-slate-400">{ingestedFiles.length} file(s)</span>
+          <span>My Indexed Documents</span>
+          <span className="text-[11px] font-mono text-slate-400">{documents.length} file(s)</span>
         </h3>
 
-        {ingestedFiles.length === 0 ? (
+        {documents.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center p-4 border border-border-card/60 rounded-lg bg-surface-2/20 text-center">
             <File className="w-6 h-6 text-slate-500 mb-1.5 opacity-60" />
-            <div className="text-xs text-slate-400">No documents indexed in this session.</div>
-            <div className="text-[11px] text-slate-500 mt-0.5">Upload a document above to begin.</div>
+            <div className="text-xs text-slate-400">No documents indexed for user {currentUser}.</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">Upload a document above to begin isolated retrieval.</div>
           </div>
         ) : (
-          <div className="overflow-y-auto space-y-1.5 pr-1 flex-1 max-h-48">
-            {ingestedFiles.map((fname, idx) => (
-              <div
-                key={idx}
-                className="flex items-center gap-2 p-2 rounded-lg bg-surface-2/50 border border-border-card text-xs text-slate-200"
-              >
-                <File className="w-3.5 h-3.5 text-sky-400 shrink-0" />
-                <span className="truncate font-mono">{fname}</span>
-              </div>
-            ))}
+          <div className="overflow-y-auto space-y-2 pr-1 flex-1 max-h-56">
+            {documents.map((doc) => {
+              const isDeleting = isDeletingDocId === doc.doc_id;
+              const hasDrive = Boolean(doc.drive_file_id);
+              const formatSize = (bytes?: number | null) => {
+                if (!bytes) return null;
+                return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
+              };
+
+              return (
+                <div
+                  key={doc.doc_id}
+                  className="p-2.5 rounded-lg bg-surface-2/50 border border-border-card text-xs flex items-center justify-between gap-2 hover:border-slate-700 transition-colors"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 font-medium text-slate-200">
+                      <File className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                      <span className="truncate font-mono">{doc.filename}</span>
+                      {hasDrive && (
+                        <span
+                          className="px-1.5 py-0.2 text-[9px] font-semibold rounded bg-emerald-950/60 text-emerald-400 border border-emerald-500/30 flex items-center gap-0.5 shrink-0"
+                          title="Synced to Google Drive"
+                        >
+                          Drive Synced
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-3 text-[10px] text-slate-400 mt-1">
+                      <span className="flex items-center gap-1 font-mono">
+                        <Layers className="w-3 h-3 text-slate-500" />
+                        {doc.chunk_count} chunk{doc.chunk_count === 1 ? '' : 's'}
+                      </span>
+                      {doc.file_size != null && (
+                        <span className="font-mono text-slate-500">
+                          {formatSize(doc.file_size)}
+                        </span>
+                      )}
+                      <span className="flex items-center gap-1 font-mono">
+                        <Calendar className="w-3 h-3 text-slate-500" />
+                        {formatDate(doc.created_at)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => onDeleteDocument(doc.doc_id, doc.filename)}
+                    disabled={isDeleting}
+                    className="p-1.5 rounded-lg text-slate-400 hover:text-red-400 hover:bg-red-950/30 border border-transparent hover:border-red-900/40 disabled:opacity-50 transition-colors"
+                    title={`Delete ${doc.filename}`}
+                  >
+                    {isDeleting ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-red-400" />
+                    ) : (
+                      <Trash2 className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

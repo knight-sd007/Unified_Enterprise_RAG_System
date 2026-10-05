@@ -1,9 +1,11 @@
 """
 Unified AI Provider Base Class.
 
-A single provider owns both vector embedding generation and chat completions.
+A single provider owns vector embedding generation, chat completions,
+and live connectivity health checks.
 """
 
+import time
 from abc import ABC, abstractmethod
 from typing import List, Optional, Dict, Any
 
@@ -16,17 +18,17 @@ class BaseAIProvider(ABC):
         self.provider_id = provider_id
 
     @abstractmethod
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+    def embed_documents(self, texts: List[str], model: Optional[str] = None) -> List[List[float]]:
         """Generates vector embeddings for document texts."""
         pass
 
     @abstractmethod
-    def embed_query(self, query: str) -> List[float]:
+    def embed_query(self, query: str, model: Optional[str] = None) -> List[float]:
         """Generates vector embedding for query text."""
         pass
 
     @abstractmethod
-    def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+    def generate(self, prompt: str, system_prompt: Optional[str] = None, model: Optional[str] = None) -> str:
         """Generates text completion using the chat model."""
         pass
 
@@ -45,8 +47,29 @@ class BaseAIProvider(ABC):
         """Returns active chat model name."""
         pass
 
+    def check_connectivity(self) -> Dict[str, Any]:
+        """
+        Performs a live connectivity test to verify if provider endpoints are reachable.
+        Returns status dictionary with 'connected', 'not_configured', or 'unreachable'.
+        """
+        if not self.is_configured():
+            return {
+                "provider_id": self.provider_id,
+                "name": self.name,
+                "status": "not_configured",
+                "message": "API credentials are not configured.",
+                "latency_ms": None,
+            }
+        return {
+            "provider_id": self.provider_id,
+            "name": self.name,
+            "status": "connected",
+            "message": "Provider is configured and ready.",
+            "latency_ms": 0.0,
+        }
+
     def get_status(self) -> Dict[str, Any]:
-        """Returns provider status dictionary."""
+        """Returns provider configuration status dictionary."""
         configured = self.is_configured()
         return {
             "name": self.name,
@@ -55,5 +78,5 @@ class BaseAIProvider(ABC):
             "status_text": "Configured" if configured else "Not Configured",
             "status_icon": "🟢" if configured else "🔴",
             "embedding_model": self.get_embedding_model_name(),
-            "chat_model": self.get_chat_model_name()
+            "chat_model": self.get_chat_model_name(),
         }

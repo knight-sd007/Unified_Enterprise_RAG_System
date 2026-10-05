@@ -17,7 +17,11 @@ class TestAPIRAGOperations(unittest.TestCase):
 
     def setUp(self):
         self.key_patcher = patch("config.settings.Config.get_app_access_key", return_value="test-app-key-123")
+        self.admin_key_patcher = patch("config.settings.Config.get_admin_access_key", return_value="test-admin-key-999")
+        self.session_key_patcher = patch("config.settings.Config.get_session_signing_key", return_value="test-signing-key-789")
         self.key_patcher.start()
+        self.admin_key_patcher.start()
+        self.session_key_patcher.start()
         self.client = TestClient(app)
         self.auth_token = create_session_token()
         self.auth_headers = {"Authorization": f"Bearer {self.auth_token}"}
@@ -28,6 +32,8 @@ class TestAPIRAGOperations(unittest.TestCase):
 
     def tearDown(self):
         set_rag_pipeline(None)
+        self.session_key_patcher.stop()
+        self.admin_key_patcher.stop()
         self.key_patcher.stop()
 
     # -------------------------------------------------------------------------
@@ -195,21 +201,34 @@ class TestAPIRAGOperations(unittest.TestCase):
         self.assertEqual(response.json()["error"]["code"], "INVALID_PROVIDER")
 
     # -------------------------------------------------------------------------
-    # Index Clearing Tests
+    # Index Clearing and Administration Tests
     # -------------------------------------------------------------------------
 
-    def test_clear_vector_index_delete(self):
-        """DELETE /api/v1/rag/index clears active index and returns confirmation."""
-        chunk = Chunk(
-            content="Content to clear.",
-            metadata={"filename": "doc.txt", "chunk_id": "c0"},
-        )
-        self.mock_store.add_chunks([chunk], [[0.1] * 768], "gemini")
-        self.assertEqual(self.mock_store.count(), 1)
-
+    def test_clear_vector_index_user_role_forbidden(self):
+        """DELETE /api/v1/rag/index called by non-admin user is rejected with 403 Forbidden."""
         response = self.client.delete(
             "/api/v1/rag/index",
             headers=self.auth_headers,
+            params={"provider_id": "gemini"},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"]["code"], "FORBIDDEN")
+
+    def test_clear_vector_index_admin_role_success(self):
+        """DELETE /api/v1/rag/index called by admin user clears global vector index."""
+        chunk = Chunk(
+            content="Content to clear.",
+            metadata={"filename": "doc.txt", "chunk_id": "c0", "owner_id": "default_user"},
+        )
+        self.mock_store.add_chunks([chunk], [[0.1] * 768], "gemini", owner_id="default_user")
+        self.assertEqual(self.mock_store.count(), 1)
+
+        admin_token = create_session_token(user_id="admin_user", role="admin")
+        admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+        response = self.client.delete(
+            "/api/v1/rag/index",
+            headers=admin_headers,
             params={"provider_id": "gemini"},
         )
         self.assertEqual(response.status_code, 200)

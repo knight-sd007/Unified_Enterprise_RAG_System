@@ -18,7 +18,9 @@ class TestAPIDocumentIngestion(unittest.TestCase):
 
     def setUp(self):
         self.key_patcher = patch("config.settings.Config.get_app_access_key", return_value="test-app-key-123")
+        self.session_key_patcher = patch("config.settings.Config.get_session_signing_key", return_value="test-signing-key-789")
         self.key_patcher.start()
+        self.session_key_patcher.start()
         self.client = TestClient(app)
         self.auth_token = create_session_token()
         self.auth_headers = {"Authorization": f"Bearer {self.auth_token}"}
@@ -29,6 +31,7 @@ class TestAPIDocumentIngestion(unittest.TestCase):
 
     def tearDown(self):
         set_rag_pipeline(None)
+        self.session_key_patcher.stop()
         self.key_patcher.stop()
 
     def test_unauthenticated_ingestion_rejected(self):

@@ -6,7 +6,7 @@ from typing import List
 from fastapi import APIRouter, Depends
 from api.dependencies import require_authentication
 from api.schemas import ProviderMetadata, ProvidersListResponse
-from config.settings import Config
+from config.settings import Config, SUPPORTED_CHAT_MODELS, SUPPORTED_EMBEDDING_MODELS
 from providers.factory import get_provider_by_id, get_supported_provider_ids
 
 router = APIRouter(
@@ -32,6 +32,9 @@ async def list_providers() -> ProvidersListResponse:
         spec = Config.get_provider_spec(provider_id)
         dimension = spec.dimension if spec else 768
 
+        chat_models = SUPPORTED_CHAT_MODELS.get(provider_id, [provider.get_chat_model_name()])
+        embed_models = SUPPORTED_EMBEDDING_MODELS.get(provider_id, [{"model": provider.get_embedding_model_name(), "dimension": dimension}])
+
         providers_list.append(
             ProviderMetadata(
                 provider_id=provider.provider_id,
@@ -40,6 +43,8 @@ async def list_providers() -> ProvidersListResponse:
                 chat_model=provider.get_chat_model_name(),
                 embedding_model=provider.get_embedding_model_name(),
                 dimension=dimension,
+                supported_chat_models=chat_models,
+                supported_embedding_models=embed_models,
             )
         )
 

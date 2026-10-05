@@ -1,8 +1,8 @@
 """
-Semantic Vector Retriever calculating exact Cosine Similarity using NumPy.
+Semantic Vector Retriever calculating exact Cosine Similarity with owner scoping.
 """
 
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Optional, Union
 import numpy as np
 from rag.vector_store import InMemoryVectorStore, QdrantVectorStore
 from providers.base import BaseAIProvider
@@ -11,7 +11,7 @@ from utils.logging import logger
 
 
 class SemanticRetriever:
-    """Retriever computing cosine similarity against stored vectors or querying Qdrant Cloud."""
+    """Retriever computing cosine similarity against stored vectors or querying Qdrant Cloud with owner isolation."""
 
     def __init__(self, vector_store: Union[InMemoryVectorStore, QdrantVectorStore, Any]):
         self.vector_store = vector_store
@@ -38,14 +38,16 @@ class SemanticRetriever:
         self,
         query: str,
         provider: BaseAIProvider,
+        owner_id: Optional[str] = None,
         top_k: int = 5,
-        similarity_threshold: float = 0.25
+        similarity_threshold: float = 0.25,
+        model: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Executes semantic vector search against in-memory index or Qdrant Cloud.
+        Executes semantic vector search against in-memory index or Qdrant Cloud with owner isolation.
         1. Validates provider identity against vector store.
         2. Embeds search query using active AI provider.
-        3. Executes search with score threshold filtering and top-K ranking.
+        3. Executes search with score threshold filtering, owner scoping, and top-K ranking.
         """
         if not query.strip():
             return []
@@ -60,8 +62,12 @@ class SemanticRetriever:
             )
 
         # Generate query vector embedding via active provider
-        logger.info(f"Generating query embedding via '{provider.name}' ({provider.get_embedding_model_name()})")
-        query_embedding = provider.embed_query(query)
+        embedding_model = model or provider.get_embedding_model_name()
+        logger.info(f"Generating query embedding via '{provider.name}' ({embedding_model})")
+        try:
+            query_embedding = provider.embed_query(query, model=model)
+        except TypeError:
+            query_embedding = provider.embed_query(query)
 
         # Check dimension consistency
         spec = Config.get_provider_spec(provider.provider_id)
@@ -77,14 +83,15 @@ class SemanticRetriever:
             return self.vector_store.search(
                 query_vector=query_embedding,
                 provider_id=provider.provider_id,
+                owner_id=owner_id,
                 top_k=top_k,
                 similarity_threshold=similarity_threshold
             )
 
-        # In-memory cosine similarity search
-        records = self.vector_store.get_records()
+        # In-memory cosine similarity search scoped to owner_id
+        records = self.vector_store.get_records(owner_id=owner_id)
         if not records:
-            logger.info("Retrieval requested on empty vector index.")
+            logger.info(f"Retrieval requested on empty vector index (owner: '{owner_id}').")
             return []
 
         scored_chunks = []
@@ -101,7 +108,9 @@ class SemanticRetriever:
                     "content": rec["content"],
                     "metadata": rec["metadata"],
                     "score": round(sim_score, 4),
-                    "chunk_id": rec.get("chunk_id", rec["id"])
+                    "chunk_id": rec.get("chunk_id", rec["id"]),
+                    "doc_id": rec.get("doc_id", ""),
+                    "owner_id": rec.get("owner_id", "default_user"),
                 })
 
         scored_chunks.sort(key=lambda x: x["score"], reverse=True)
@@ -109,6 +118,6 @@ class SemanticRetriever:
 
         logger.info(
             f"Retrieved {len(top_results)} chunk(s) from {len(records)} evaluated vector(s) "
-            f"using provider '{provider.name}'."
+            f"using provider '{provider.name}' (owner: '{owner_id}')."
         )
         return top_results

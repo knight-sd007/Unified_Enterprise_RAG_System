@@ -11,6 +11,8 @@ services:
       - "${P06_HOST_PORT:-8006}:8000"
     environment:
       - APP_ACCESS_KEY=${APP_ACCESS_KEY:-}
+      - ADMIN_ACCESS_KEY=${ADMIN_ACCESS_KEY:-}
+      - SESSION_SIGNING_KEY=${SESSION_SIGNING_KEY:-}
       - AI_PROVIDER=${AI_PROVIDER:-gemini}
       # Google Gemini
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
@@ -28,6 +30,8 @@ services:
       # Qdrant Cloud
       - QDRANT_URL=${QDRANT_URL:-}
       - QDRANT_API_KEY=${QDRANT_API_KEY:-}
+    volumes:
+      - p06_data:/app/data
     deploy:
       resources:
         limits:
@@ -46,3 +50,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  p06_data:
+    name: p06_metadata_data

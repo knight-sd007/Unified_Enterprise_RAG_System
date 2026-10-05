@@ -1,5 +1,5 @@
 """
-Document Chunker supporting sliding window text splitting with overlap.
+Document Chunker supporting sliding window text splitting with overlap and ownership preservation.
 """
 
 from dataclasses import dataclass, field
@@ -16,14 +16,14 @@ class Chunk:
 
 
 class DocumentChunker:
-    """Configurable text chunker preserving metadata across splits."""
+    """Configurable text chunker preserving metadata and ownership across splits."""
 
     def __init__(self, chunk_size: int = 500, chunk_overlap: int = 50):
         self.chunk_size = max(100, chunk_size)
         self.chunk_overlap = max(0, min(chunk_overlap, self.chunk_size - 1))
 
     def chunk_documents(self, documents: List[Document]) -> List[Chunk]:
-        """Splits Document objects into Chunk objects."""
+        """Splits Document objects into Chunk objects with preserved doc_id and owner_id."""
         all_chunks = []
         global_idx = 0
 
@@ -32,13 +32,21 @@ class DocumentChunker:
             if not text:
                 continue
 
+            doc_id = doc.metadata.get("doc_id", f"doc_{global_idx}")
+            owner_id = doc.metadata.get("owner_id", "default_user")
+            filename = doc.metadata.get("filename", "doc")
+
             splits = self._split_text(text)
             for sub_idx, chunk_text in enumerate(splits):
                 global_idx += 1
                 meta = doc.metadata.copy()
                 meta.update({
-                    "chunk_id": f"{meta.get('filename', 'doc')}_c{global_idx}",
-                    "sub_chunk_index": sub_idx
+                    "doc_id": doc_id,
+                    "owner_id": owner_id,
+                    "filename": filename,
+                    "chunk_id": f"{doc_id}_c{sub_idx}",
+                    "sub_chunk_index": sub_idx,
+                    "global_chunk_index": global_idx,
                 })
                 all_chunks.append(Chunk(content=chunk_text, metadata=meta))
 

@@ -2,8 +2,9 @@
 API Dependencies, Authentication, and Session Verification.
 """
 
+from dataclasses import dataclass
 import os
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Union
 from fastapi import Request
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from config.settings import Config
@@ -30,37 +31,57 @@ class APIError(Exception):
         super().__init__(message)
 
 
+@dataclass
+class UserSession:
+    """Represents an authenticated user session."""
+    user_id: str = "default_user"
+    role: str = "user"
+    authenticated: bool = True
+
+    @property
+    def is_admin(self) -> bool:
+        """Returns True if the session possesses administrative privileges."""
+        return self.role == "admin"
+
+
 def _get_serializer() -> URLSafeTimedSerializer:
-    """Returns timed serializer using application access key as signing secret."""
-    secret = Config.get_app_access_key()
+    """Returns timed serializer using dedicated SESSION_SIGNING_KEY as secret."""
+    secret = Config.get_session_signing_key()
     if not secret:
         raise APIError(
             status_code=500,
             code="AUTH_CONFIGURATION_ERROR",
-            message="Application access key is not configured.",
+            message="Session signing key (SESSION_SIGNING_KEY) is not configured.",
         )
     return URLSafeTimedSerializer(secret_key=secret, salt=SESSION_SALT)
 
 
-def create_session_token() -> str:
-    """Generates a cryptographically signed, timestamped session token."""
+def create_session_token(user_id: str = "default_user", role: str = "user") -> str:
+    """Generates a cryptographically signed, timestamped session token with identity."""
     serializer = _get_serializer()
-    return serializer.dumps({"authenticated": True})
+    return serializer.dumps({"authenticated": True, "user_id": user_id, "role": role})
 
 
-def verify_session_token(token: str) -> bool:
+def verify_session_token(token: str) -> Optional[Dict[str, Any]]:
     """
     Validates signature and expiration of a session token.
-    Returns True if valid and unexpired; False otherwise.
+    Returns session dict payload if valid; None otherwise.
     """
     if not token or not isinstance(token, str):
-        return False
+        return None
     try:
         serializer = _get_serializer()
         data = serializer.loads(token, max_age=SESSION_MAX_AGE_SECONDS)
-        return isinstance(data, dict) and data.get("authenticated") is True
+        if isinstance(data, dict) and data.get("authenticated") is True:
+            # Backward compatibility for legacy session tokens that lacked user_id
+            if "user_id" not in data:
+                data["user_id"] = "default_user"
+            if "role" not in data:
+                data["role"] = "user"
+            return data
+        return None
     except (BadSignature, SignatureExpired, APIError, Exception):
-        return False
+        return None
 
 
 def extract_session_token(request: Request) -> Optional[str]:
@@ -80,29 +101,52 @@ def extract_session_token(request: Request) -> Optional[str]:
     return None
 
 
-def get_current_session(request: Request) -> bool:
+def get_current_session(request: Request) -> Optional[UserSession]:
     """
-    Returns True if the current request presents a valid session token, False otherwise.
+    Returns UserSession if the current request presents a valid session token, None otherwise.
     Does not raise an exception.
     """
     token = extract_session_token(request)
     if not token:
-        return False
-    return verify_session_token(token)
+        return None
+    payload = verify_session_token(token)
+    if not payload:
+        return None
+    return UserSession(
+        user_id=payload.get("user_id", "default_user"),
+        role=payload.get("role", "user"),
+        authenticated=True,
+    )
 
 
-def require_authentication(request: Request) -> bool:
+def require_authentication(request: Request) -> UserSession:
     """
     FastAPI dependency enforcing valid session authentication.
-    Raises structured 401 APIError if unauthenticated.
+    Returns authenticated UserSession or raises structured 401 APIError.
     """
-    if not get_current_session(request):
+    session = get_current_session(request)
+    if not session:
         raise APIError(
             status_code=401,
             code="UNAUTHORIZED",
             message="Authentication required.",
         )
-    return True
+    return session
+
+
+def require_admin(request: Request) -> UserSession:
+    """
+    FastAPI dependency enforcing administrative privileges.
+    Returns authenticated UserSession or raises structured 403 APIError.
+    """
+    session = require_authentication(request)
+    if not session.is_admin:
+        raise APIError(
+            status_code=403,
+            code="FORBIDDEN",
+            message="Administrative privileges required for this operation.",
+        )
+    return session
 
 
 # -----------------------------------------------------------------------------

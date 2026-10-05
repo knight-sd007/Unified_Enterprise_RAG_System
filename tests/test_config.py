@@ -64,6 +64,16 @@ class TestConfigurationAndSecurity(unittest.TestCase):
         """get_app_access_key returns empty string when APP_ACCESS_KEY is not set (no hardcoded fallback)."""
         self.assertEqual(Config.get_app_access_key(), "")
 
+    @patch.dict("os.environ", {"SESSION_SIGNING_KEY": "test-signing-secret"}, clear=True)
+    def test_session_signing_key_retrieval(self):
+        """get_session_signing_key returns configured signing key."""
+        self.assertEqual(Config.get_session_signing_key(), "test-signing-secret")
+
+    @patch.dict("os.environ", {"ADMIN_ACCESS_KEY": ""}, clear=True)
+    def test_admin_access_key_empty_when_unset(self):
+        """get_admin_access_key returns empty string without defaulting to app access key."""
+        self.assertEqual(Config.get_admin_access_key(), "")
+
 
 if __name__ == "__main__":
     unittest.main()

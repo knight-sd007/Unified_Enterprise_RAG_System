@@ -1,9 +1,13 @@
-"""
-Authentication routes for application access key gate.
-"""
-
+import hmac
 import os
+import re
+import secrets
+from urllib.parse import quote
+from typing import Optional
+import httpx
 from fastapi import APIRouter, Request, Response
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+
 from api.dependencies import (
     APIError,
     SESSION_COOKIE_NAME,
@@ -13,40 +17,97 @@ from api.dependencies import (
 )
 from api.schemas import (
     AuthStatusResponse,
+    GoogleAuthConfigResponse,
+    GoogleAuthUrlResponse,
+    GoogleOAuthCallbackRequest,
     LoginRequest,
     LoginResponse,
     LogoutResponse,
 )
 from config.settings import Config
+from rag.storage.metadata_db import get_metadata_repo
+from utils.logging import logger
 from utils.security import verify_access_key
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+OAUTH_STATE_COOKIE_NAME = "p06_oauth_state"
+OAUTH_STATE_MAX_AGE_SECONDS = 600  # 10 minutes
+OAUTH_STATE_SALT = "p06-oauth-state-v1"
+
+
+def _get_oauth_state_serializer() -> URLSafeTimedSerializer:
+    """Returns timed serializer using dedicated SESSION_SIGNING_KEY."""
+    secret = Config.get_session_signing_key()
+    if not secret:
+        raise APIError(
+            status_code=500,
+            code="AUTH_CONFIGURATION_ERROR",
+            message="Session signing key (SESSION_SIGNING_KEY) is not configured.",
+        )
+    return URLSafeTimedSerializer(secret_key=secret, salt=OAUTH_STATE_SALT)
+
+
+def create_oauth_state_token(state: str) -> str:
+    """Signs an OAuth state token with timestamp and HMAC."""
+    return _get_oauth_state_serializer().dumps(state)
+
+
+def verify_oauth_state_token(signed_token: str, max_age: int = OAUTH_STATE_MAX_AGE_SECONDS) -> Optional[str]:
+    """Verifies signature and expiration of an OAuth state token."""
+    if not signed_token or not isinstance(signed_token, str):
+        return None
+    try:
+        data = _get_oauth_state_serializer().loads(signed_token, max_age=max_age)
+        return str(data) if data else None
+    except (BadSignature, SignatureExpired, Exception):
+        return None
+
+
+def _sanitize_username(username: str) -> str:
+    """Sanitizes username into alphanumeric safe identifier."""
+    cleaned = re.sub(r"[^a-zA-Z0-9_\-\.]", "", username.strip().lower())
+    return cleaned[:64] if cleaned else "default_user"
 
 
 @router.post(
     "/login",
     response_model=LoginResponse,
     summary="Authenticate with access key",
-    description="Validates the application access key and issues an HTTP-only session cookie.",
+    description="Validates the application or admin access key, binds user identity, and issues an HTTP-only session cookie.",
 )
 async def login(req: LoginRequest, response: Response) -> LoginResponse:
-    """Authenticates access key and sets secure session cookie."""
-    expected_key = Config.get_app_access_key()
-    if not expected_key:
+    """Authenticates access key and sets secure session cookie with user identity."""
+    app_key = Config.get_app_access_key()
+    admin_key = Config.get_admin_access_key()
+
+    if not app_key and not admin_key:
         raise APIError(
             status_code=500,
             code="AUTH_CONFIGURATION_ERROR",
             message="Application access key is not configured.",
         )
 
-    if not verify_access_key(req.access_key, expected_key):
+    # Validate access key and resolve role
+    is_admin = bool(admin_key and verify_access_key(req.access_key, admin_key))
+    is_app_user = bool(app_key and verify_access_key(req.access_key, app_key))
+
+    if not is_admin and not is_app_user:
         raise APIError(
             status_code=401,
             code="AUTHENTICATION_FAILED",
             message="Invalid access key.",
         )
 
-    session_token = create_session_token()
+    role = "admin" if is_admin else "user"
+
+    # Resolve user identity
+    if req.username and req.username.strip():
+        user_id = _sanitize_username(req.username)
+    else:
+        user_id = "admin" if is_admin else "default_user"
+
+    session_token = create_session_token(user_id=user_id, role=role)
     is_secure = os.getenv("SESSION_COOKIE_SECURE", "false").lower() in ("true", "1", "yes")
 
     response.set_cookie(
@@ -61,20 +122,244 @@ async def login(req: LoginRequest, response: Response) -> LoginResponse:
 
     return LoginResponse(
         authenticated=True,
+        user_id=user_id,
+        role=role,
         message="Authentication successful.",
     )
+
+
+@router.get(
+    "/google/config",
+    response_model=GoogleAuthConfigResponse,
+    summary="Google OAuth Configuration",
+    description="Returns public client configuration for Google OAuth integration.",
+)
+async def get_google_auth_config() -> GoogleAuthConfigResponse:
+    """Returns Google OAuth client setup status."""
+    configured = Config.is_google_oauth_configured()
+    return GoogleAuthConfigResponse(
+        configured=configured,
+        client_id=Config.get_google_client_id() if configured else None,
+        redirect_uri=Config.get_google_redirect_uri() if configured else None,
+    )
+
+
+@router.get(
+    "/google/url",
+    response_model=GoogleAuthUrlResponse,
+    summary="Generate Google OAuth Authorization URL",
+    description="Generates an OAuth authorization URL with a cryptographically signed anti-CSRF state token and sets a secure HttpOnly cookie.",
+)
+async def get_google_auth_url(response: Response) -> GoogleAuthUrlResponse:
+    """Generates Google OAuth URL and binds cryptographic anti-CSRF state in a secure cookie."""
+    if not Config.is_google_oauth_configured():
+        raise APIError(
+            status_code=400,
+            code="OAUTH_NOT_CONFIGURED",
+            message="Google OAuth is not configured on this server.",
+        )
+
+    client_id = Config.get_google_client_id()
+    redirect_uri = Config.get_google_redirect_uri()
+    raw_state = secrets.token_urlsafe(32)
+    signed_state = create_oauth_state_token(raw_state)
+
+    is_secure = os.getenv("SESSION_COOKIE_SECURE", "false").lower() in ("true", "1", "yes")
+    response.set_cookie(
+        key=OAUTH_STATE_COOKIE_NAME,
+        value=signed_state,
+        max_age=OAUTH_STATE_MAX_AGE_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=is_secure,
+        path="/",
+    )
+
+    scope = "openid email profile https://www.googleapis.com/auth/drive.file"
+    auth_url = (
+        f"https://accounts.google.com/o/oauth2/v2/auth"
+        f"?client_id={quote(client_id)}"
+        f"&redirect_uri={quote(redirect_uri)}"
+        f"&response_type=code"
+        f"&scope={quote(scope)}"
+        f"&state={quote(raw_state)}"
+        f"&access_type=offline"
+        f"&prompt=consent"
+    )
+
+    return GoogleAuthUrlResponse(url=auth_url, state=raw_state)
+
+
+@router.post(
+    "/google/callback",
+    response_model=LoginResponse,
+    summary="Google OAuth Callback & Token Exchange",
+    description="Exchanges Google authorization code for tokens, validates server-bound anti-CSRF state, verifies identity and email status, and issues a session cookie.",
+)
+async def google_oauth_callback(
+    request: Request, payload: GoogleOAuthCallbackRequest, response: Response
+) -> LoginResponse:
+    """Exchanges Google authorization code, validates CSRF state, and provisions authenticated session."""
+    if not Config.is_google_oauth_configured():
+        raise APIError(
+            status_code=400,
+            code="OAUTH_NOT_CONFIGURED",
+            message="Google OAuth is not configured on this server.",
+        )
+
+    # 1. Anti-CSRF server-bound state validation
+    state_cookie = request.cookies.get(OAUTH_STATE_COOKIE_NAME)
+    if not state_cookie or not payload.state:
+        response.delete_cookie(key=OAUTH_STATE_COOKIE_NAME, path="/")
+        raise APIError(
+            status_code=400,
+            code="INVALID_OAUTH_STATE",
+            message="OAuth anti-CSRF state token is missing.",
+        )
+
+    verified_raw_state = verify_oauth_state_token(state_cookie)
+    if not verified_raw_state:
+        response.delete_cookie(key=OAUTH_STATE_COOKIE_NAME, path="/")
+        raise APIError(
+            status_code=400,
+            code="EXPIRED_OAUTH_STATE",
+            message="OAuth anti-CSRF state token is invalid or expired.",
+        )
+
+    if not hmac.compare_digest(verified_raw_state, payload.state):
+        response.delete_cookie(key=OAUTH_STATE_COOKIE_NAME, path="/")
+        raise APIError(
+            status_code=400,
+            code="OAUTH_STATE_MISMATCH",
+            message="OAuth anti-CSRF state token verification failed.",
+        )
+
+    # Invalidate OAuth state cookie immediately after verification to prevent replay
+    response.delete_cookie(key=OAUTH_STATE_COOKIE_NAME, path="/")
+
+    client_id = Config.get_google_client_id()
+    client_secret = Config.get_google_client_secret()
+    redirect_uri = Config.get_google_redirect_uri()
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as http_client:
+            # 2. Exchange auth code for tokens
+            token_resp = await http_client.post(
+                "https://oauth2.googleapis.com/token",
+                data={
+                    "code": payload.code,
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "redirect_uri": redirect_uri,
+                    "grant_type": "authorization_code",
+                },
+            )
+
+            if token_resp.status_code != 200:
+                logger.error(f"Google token exchange failed: {token_resp.text}")
+                raise APIError(
+                    status_code=401,
+                    code="OAUTH_EXCHANGE_FAILED",
+                    message="Failed to exchange authorization code with Google.",
+                )
+
+            token_data = token_resp.json()
+            access_token = token_data.get("access_token")
+
+            # 3. Retrieve verified user identity
+            userinfo_resp = await http_client.get(
+                "https://www.googleapis.com/oauth2/v3/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+
+            if userinfo_resp.status_code != 200:
+                logger.error(f"Google userinfo lookup failed: {userinfo_resp.text}")
+                raise APIError(
+                    status_code=401,
+                    code="OAUTH_USERINFO_FAILED",
+                    message="Failed to retrieve user profile from Google.",
+                )
+
+            userinfo = userinfo_resp.json()
+            sub = userinfo.get("sub")
+            email = userinfo.get("email", "").lower()
+            email_verified = userinfo.get("email_verified") is True
+
+            if not sub:
+                raise APIError(
+                    status_code=400,
+                    code="INVALID_OAUTH_PAYLOAD",
+                    message="Google identity sub claim is missing.",
+                )
+
+            # Canonical multi-user identifier for OAuth
+            user_id = f"google_{sub}"
+
+            # 4. Check role escalation allowlist with strictly verified email and dedicated subject-ID allowlist
+            admin_emails = [e.strip().lower() for e in Config.get_google_admin_emails() if e.strip()]
+            admin_subs = [s.strip() for s in Config.get_google_admin_subs() if s.strip()]
+
+            is_admin_by_email = bool(email_verified and email and email in admin_emails)
+            is_admin_by_sub = bool(sub and sub in admin_subs)
+            is_admin = is_admin_by_email or is_admin_by_sub
+            role = "admin" if is_admin else "user"
+
+            # 5. Save encrypted tokens for Drive storage integration
+            repo = get_metadata_repo()
+            repo.save_oauth_tokens(user_id, "google", token_data)
+
+            # 6. Issue session cookie
+            session_token = create_session_token(user_id=user_id, role=role)
+            is_secure = os.getenv("SESSION_COOKIE_SECURE", "false").lower() in ("true", "1", "yes")
+
+            response.set_cookie(
+                key=SESSION_COOKIE_NAME,
+                value=session_token,
+                max_age=SESSION_MAX_AGE_SECONDS,
+                httponly=True,
+                samesite="lax",
+                secure=is_secure,
+                path="/",
+            )
+
+            logger.info(f"Google OAuth login success for user '{user_id}' (email: '{email}', email_verified: {email_verified}, role: '{role}')")
+
+            return LoginResponse(
+                authenticated=True,
+                user_id=user_id,
+                role=role,
+                message=f"Google authentication successful for {email or user_id}.",
+            )
+
+    except APIError:
+        response.delete_cookie(key=OAUTH_STATE_COOKIE_NAME, path="/")
+        raise
+    except Exception as e:
+        response.delete_cookie(key=OAUTH_STATE_COOKIE_NAME, path="/")
+        logger.error(f"Unexpected OAuth callback error: {e}")
+        raise APIError(
+            status_code=500,
+            code="OAUTH_INTERNAL_ERROR",
+            message="An error occurred while completing Google authentication.",
+        )
 
 
 @router.get(
     "/status",
     response_model=AuthStatusResponse,
     summary="Check session authentication status",
-    description="Returns whether the caller has an active authenticated session.",
+    description="Returns whether the caller has an active authenticated session and user identity.",
 )
 async def auth_status(request: Request) -> AuthStatusResponse:
-    """Checks session validity from cookie or Authorization header."""
-    is_auth = get_current_session(request)
-    return AuthStatusResponse(authenticated=is_auth)
+    """Checks session validity and identity from cookie or Authorization header."""
+    session = get_current_session(request)
+    if not session:
+        return AuthStatusResponse(authenticated=False, user_id=None, role=None)
+    return AuthStatusResponse(
+        authenticated=True,
+        user_id=session.user_id,
+        role=session.role,
+    )
 
 
 @router.post(

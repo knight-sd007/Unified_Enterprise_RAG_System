@@ -3,7 +3,8 @@ Unified NVIDIA NIM Provider Implementation.
 """
 
 import math
-from typing import List, Optional, Any
+import time
+from typing import List, Optional, Any, Dict
 from providers.base import BaseAIProvider
 from config.settings import Config
 from utils.logging import logger
@@ -29,6 +30,39 @@ class NvidiaNimProvider(BaseAIProvider):
     def get_chat_model_name(self) -> str:
         """Returns NVIDIA chat model."""
         return Config.get_nvidia_chat_model()
+
+    def check_connectivity(self) -> Dict[str, Any]:
+        """Performs live connectivity check against NVIDIA NIM endpoint."""
+        if not self.is_configured():
+            return {
+                "provider_id": self.provider_id,
+                "name": self.name,
+                "status": "not_configured",
+                "message": "NVIDIA_API_KEY is not configured.",
+                "latency_ms": None,
+            }
+
+        start = time.perf_counter()
+        try:
+            client = self._get_client()
+            client.models.list()
+            latency = round((time.perf_counter() - start) * 1000, 2)
+            return {
+                "provider_id": self.provider_id,
+                "name": self.name,
+                "status": "connected",
+                "message": "Successfully connected to NVIDIA NIM endpoint.",
+                "latency_ms": latency,
+            }
+        except Exception as e:
+            clean_err = sanitize_error_message(e)
+            return {
+                "provider_id": self.provider_id,
+                "name": self.name,
+                "status": "unreachable",
+                "message": f"NVIDIA NIM connectivity error: {clean_err}",
+                "latency_ms": None,
+            }
 
     @staticmethod
     def _validate_vector(vec: Any, expected_dim: int = EXPECTED_NVIDIA_EMBEDDING_DIMENSION) -> List[float]:
@@ -68,14 +102,14 @@ class NvidiaNimProvider(BaseAIProvider):
             raise ValueError("NVIDIA API key is missing. Set NVIDIA_API_KEY in environment or settings.")
         return openai.OpenAI(api_key=api_key, base_url=base_url)
 
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+    def embed_documents(self, texts: List[str], model: Optional[str] = None) -> List[List[float]]:
         """Generates document embeddings using NVIDIA NIM API with strict validation."""
         if not texts:
             return []
         if not self.is_configured():
             raise ValueError("NVIDIA NIM provider is not configured.")
 
-        model = self.get_embedding_model_name()
+        model = model or self.get_embedding_model_name()
         spec = Config.get_provider_spec("nvidia_nim")
         expected_dim = spec.dimension if spec else EXPECTED_NVIDIA_EMBEDDING_DIMENSION
 
@@ -98,18 +132,14 @@ class NvidiaNimProvider(BaseAIProvider):
         except Exception as e:
             clean_err = sanitize_error_message(e)
             logger.error(f"NVIDIA NIM embedding error: {clean_err}")
-            if str(clean_err).startswith("NVIDIA NIM Embedding Error:"):
-                raise RuntimeError(clean_err)
             raise RuntimeError(f"NVIDIA NIM Embedding Error: {clean_err}")
 
-    def embed_query(self, query: str) -> List[float]:
-        """Generates query embedding using NVIDIA NIM API with strict validation and query input_type."""
-        if not query or not query.strip():
-            raise ValueError("Query text cannot be empty for embedding generation.")
+    def embed_query(self, query: str, model: Optional[str] = None) -> List[float]:
+        """Generates query embedding using NVIDIA NIM API with strict validation."""
         if not self.is_configured():
             raise ValueError("NVIDIA NIM provider is not configured.")
 
-        model = self.get_embedding_model_name()
+        model = model or self.get_embedding_model_name()
         spec = Config.get_provider_spec("nvidia_nim")
         expected_dim = spec.dimension if spec else EXPECTED_NVIDIA_EMBEDDING_DIMENSION
 
@@ -118,28 +148,27 @@ class NvidiaNimProvider(BaseAIProvider):
             logger.info(f"Generating NVIDIA NIM query embedding (model: '{model}')")
             response = client.embeddings.create(
                 model=model,
-                input=[query.strip()],
+                input=[query],
                 extra_body={
                     "input_type": "query",
                     "truncate": "NONE"
                 }
             )
             if not response.data or len(response.data) == 0:
-                raise RuntimeError("NVIDIA NIM Embedding Error: Empty data list returned from NVIDIA NIM API.")
+                raise RuntimeError("NVIDIA NIM Embedding Error: No embedding data returned for query.")
+
             return self._validate_vector(list(response.data[0].embedding), expected_dim=expected_dim)
         except Exception as e:
             clean_err = sanitize_error_message(e)
             logger.error(f"NVIDIA NIM query embedding error: {clean_err}")
-            if str(clean_err).startswith("NVIDIA NIM Embedding Error:"):
-                raise RuntimeError(clean_err)
             raise RuntimeError(f"NVIDIA NIM Embedding Error: {clean_err}")
 
-    def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        """Generates chat completion using NVIDIA NIM API."""
+    def generate(self, prompt: str, system_prompt: Optional[str] = None, model: Optional[str] = None) -> str:
+        """Generates completion using NVIDIA NIM API."""
         if not self.is_configured():
             raise ValueError("NVIDIA NIM provider is not configured.")
 
-        model = self.get_chat_model_name()
+        model = model or self.get_chat_model_name()
         try:
             client = self._get_client()
             messages = []
@@ -151,7 +180,8 @@ class NvidiaNimProvider(BaseAIProvider):
             response = client.chat.completions.create(
                 model=model,
                 messages=messages,
-                temperature=0.2
+                temperature=0.2,
+                max_tokens=2048,
             )
             if response.choices and len(response.choices) > 0:
                 return response.choices[0].message.content or ""

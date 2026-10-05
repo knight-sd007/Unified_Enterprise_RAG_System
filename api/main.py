@@ -11,7 +11,7 @@ from typing import List, Optional
 from fastapi import FastAPI, Depends, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.openapi.docs import get_redoc_html, get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,7 +19,16 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from api.dependencies import APIError, require_authentication
-from api.routes import auth, documents, health, providers, rag
+from api.routes import admin, auth, documents, health, providers, rag
+from api.schemas import (
+    DocumentDeleteResponse,
+    DocumentIngestResponse,
+    DocumentItem,
+    DocumentListResponse,
+    ErrorDetail,
+    ErrorResponse,
+    UserClearResponse,
+)
 from utils.security import sanitize_error_message
 
 
@@ -34,9 +43,9 @@ app = FastAPI(
         "Enterprise Retrieval-Augmented Generation REST API with unified "
         "AI provider abstraction (Google Gemini, NVIDIA NIM, OpenAI)."
     ),
-    docs_url=None,       # Disabled public Swagger UI (protected via custom route)
-    openapi_url=None,    # Disabled public OpenAPI schema (protected via custom route)
-    redoc_url=None,      # Disabled ReDoc
+    docs_url=None,       # Handled explicitly with OpenAPI customization
+    openapi_url=None,    # Handled explicitly with OpenAPI customization
+    redoc_url=None,      # Handled explicitly with OpenAPI customization
 )
 
 
@@ -91,7 +100,7 @@ if allowed_origins:
 @app.exception_handler(APIError)
 async def api_error_handler(request: Request, exc: APIError):
     """Handles controlled API errors with structured payload."""
-    return JSONResponse(
+    response = JSONResponse(
         status_code=exc.status_code,
         content={
             "error": {
@@ -101,6 +110,9 @@ async def api_error_handler(request: Request, exc: APIError):
             }
         },
     )
+    if "p06_oauth_state" in request.cookies:
+        response.delete_cookie(key="p06_oauth_state", path="/")
+    return response
 
 
 @app.exception_handler(RequestValidationError)
@@ -162,19 +174,21 @@ async def generic_exception_handler(request: Request, exc: Exception):
 # API Version 1 Routers
 # -----------------------------------------------------------------------------
 
+app.include_router(health.router)
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(providers.router, prefix="/api/v1")
 app.include_router(documents.router, prefix="/api/v1")
 app.include_router(rag.router, prefix="/api/v1")
+app.include_router(admin.router)
 
 
 # -----------------------------------------------------------------------------
-# Protected OpenAPI Schema and Swagger UI Routes
+# OpenAPI Schema, Swagger UI, and ReDoc Documentation Routes
 # -----------------------------------------------------------------------------
 
 def _generate_custom_openapi():
-    """Generates and caches OpenAPI schema for the application."""
+    """Generates and caches OpenAPI schema for the application with security schemes."""
     if app.openapi_schema:
         return app.openapi_schema
     openapi_schema = get_openapi(
@@ -183,6 +197,57 @@ def _generate_custom_openapi():
         description=app.description,
         routes=app.routes,
     )
+
+    components = openapi_schema.setdefault("components", {})
+    schemas = components.setdefault("schemas", {})
+
+    # Ensure Error models are registered in schemas
+    if "ErrorDetail" not in schemas:
+        schemas["ErrorDetail"] = ErrorDetail.model_json_schema()
+    if "ErrorResponse" not in schemas:
+        schemas["ErrorResponse"] = ErrorResponse.model_json_schema()
+
+    security_schemes = components.setdefault("securitySchemes", {})
+    security_schemes["CookieAuth"] = {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "p06_session",
+        "description": (
+            "Cryptographically signed HttpOnly session cookie set upon successful login at /api/v1/auth/login. "
+            "Used automatically by browser clients."
+        ),
+    }
+    security_schemes["BearerAuth"] = {
+        "type": "http",
+        "scheme": "bearer",
+        "description": (
+            "Session token passed in the Authorization header: `Authorization: Bearer <session_token>`."
+        ),
+    }
+
+    # Annotate protected operational routes with security requirements and 401 error response
+    paths = openapi_schema.get("paths", {})
+    for path, path_item in paths.items():
+        if (
+            path.startswith("/api/v1/providers")
+            or path.startswith("/api/v1/documents")
+            or path.startswith("/api/v1/rag")
+            or path.startswith("/api/v1/admin")
+        ):
+            for method, operation in path_item.items():
+                if isinstance(operation, dict):
+                    operation.setdefault("security", [{"CookieAuth": []}, {"BearerAuth": []}])
+                    responses = operation.setdefault("responses", {})
+                    if "401" not in responses:
+                        responses["401"] = {
+                            "description": "Unauthorized — Valid `p06_session` cookie or `Bearer` token required.",
+                            "content": {
+                                "application/json": {
+                                    "schema": {"$ref": "#/components/schemas/ErrorResponse"}
+                                }
+                            }
+                        }
+
     app.openapi_schema = openapi_schema
     return app.openapi_schema
 
@@ -190,20 +255,20 @@ def _generate_custom_openapi():
 @app.get(
     "/openapi.json",
     include_in_schema=False,
-    summary="Protected OpenAPI schema",
+    summary="OpenAPI Schema",
 )
-async def get_protected_openapi(authenticated: bool = Depends(require_authentication)):
-    """Returns OpenAPI schema only for authenticated sessions."""
+async def get_openapi_schema():
+    """Returns OpenAPI schema."""
     return JSONResponse(content=_generate_custom_openapi())
 
 
 @app.get(
     "/docs",
     include_in_schema=False,
-    summary="Protected Swagger UI",
+    summary="Swagger UI",
 )
-async def get_protected_swagger_ui(authenticated: bool = Depends(require_authentication)):
-    """Renders interactive Swagger UI documentation for authenticated sessions."""
+async def get_swagger_ui():
+    """Renders interactive Swagger UI documentation."""
     return get_swagger_ui_html(
         openapi_url="/openapi.json",
         title=f"{app.title} — API Documentation",
@@ -211,25 +276,51 @@ async def get_protected_swagger_ui(authenticated: bool = Depends(require_authent
 
 
 @app.get(
+    "/redoc",
+    include_in_schema=False,
+    summary="ReDoc Documentation",
+)
+async def get_redoc():
+    """Renders ReDoc API documentation."""
+    return get_redoc_html(
+        openapi_url="/openapi.json",
+        title=f"{app.title} — ReDoc",
+    )
+
+
+@app.get(
     "/api/v1/openapi.json",
     include_in_schema=False,
-    summary="Protected OpenAPI schema (versioned alias)",
+    summary="OpenAPI Schema (versioned alias)",
 )
-async def get_protected_openapi_v1(authenticated: bool = Depends(require_authentication)):
-    """Versioned alias for protected OpenAPI schema."""
+async def get_openapi_schema_v1():
+    """Versioned alias for OpenAPI schema."""
     return JSONResponse(content=_generate_custom_openapi())
 
 
 @app.get(
     "/api/v1/docs",
     include_in_schema=False,
-    summary="Protected Swagger UI (versioned alias)",
+    summary="Swagger UI (versioned alias)",
 )
-async def get_protected_swagger_ui_v1(authenticated: bool = Depends(require_authentication)):
-    """Versioned alias for protected Swagger UI documentation."""
+async def get_swagger_ui_v1():
+    """Versioned alias for Swagger UI documentation."""
     return get_swagger_ui_html(
         openapi_url="/api/v1/openapi.json",
         title=f"{app.title} — API Documentation",
+    )
+
+
+@app.get(
+    "/api/v1/redoc",
+    include_in_schema=False,
+    summary="ReDoc Documentation (versioned alias)",
+)
+async def get_redoc_v1():
+    """Versioned alias for ReDoc documentation."""
+    return get_redoc_html(
+        openapi_url="/api/v1/openapi.json",
+        title=f"{app.title} — ReDoc",
     )
 
 
@@ -277,6 +368,7 @@ async def serve_spa_fallback(full_path: str):
         full_path.startswith("api/")
         or full_path.startswith("docs")
         or full_path.startswith("openapi.json")
+        or full_path.startswith("redoc")
     ):
         raise StarletteHTTPException(
             status_code=404,

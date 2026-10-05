@@ -3,7 +3,8 @@ Unified Google Gemini Provider Implementation.
 """
 
 import math
-from typing import List, Optional, Any
+import time
+from typing import List, Optional, Any, Dict
 from providers.base import BaseAIProvider
 from config.settings import Config
 from utils.logging import logger
@@ -29,6 +30,42 @@ class GeminiProvider(BaseAIProvider):
     def get_chat_model_name(self) -> str:
         """Returns Gemini chat model."""
         return Config.get_gemini_chat_model()
+
+    def check_connectivity(self) -> Dict[str, Any]:
+        """Performs live connectivity check against Google Gemini API."""
+        if not self.is_configured():
+            return {
+                "provider_id": self.provider_id,
+                "name": self.name,
+                "status": "not_configured",
+                "message": "GEMINI_API_KEY is not configured.",
+                "latency_ms": None,
+            }
+
+        start = time.perf_counter()
+        try:
+            api_key = Config.get_gemini_api_key()
+            from google import genai
+            client = genai.Client(api_key=api_key)
+            # Lightweight model lookup
+            client.models.get(model="models/gemini-1.5-flash")
+            latency = round((time.perf_counter() - start) * 1000, 2)
+            return {
+                "provider_id": self.provider_id,
+                "name": self.name,
+                "status": "connected",
+                "message": "Successfully connected to Google Gemini API.",
+                "latency_ms": latency,
+            }
+        except Exception as e:
+            clean_err = sanitize_error_message(e)
+            return {
+                "provider_id": self.provider_id,
+                "name": self.name,
+                "status": "unreachable",
+                "message": f"Gemini connectivity error: {clean_err}",
+                "latency_ms": None,
+            }
 
     @staticmethod
     def _validate_vector(vec: Any, expected_dim: int = EXPECTED_GEMINI_EMBEDDING_DIMENSION) -> List[float]:
@@ -59,7 +96,7 @@ class GeminiProvider(BaseAIProvider):
             float_vec.append(f_val)
         return float_vec
 
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+    def embed_documents(self, texts: List[str], model: Optional[str] = None) -> List[List[float]]:
         """Generates document embeddings using Gemini API with strict validation."""
         if not texts:
             return []
@@ -67,7 +104,7 @@ class GeminiProvider(BaseAIProvider):
             raise ValueError("Google Gemini provider is not configured.")
 
         api_key = Config.get_gemini_api_key()
-        model_name = self.get_embedding_model_name()
+        model_name = model or self.get_embedding_model_name()
         spec = Config.get_provider_spec("gemini")
         expected_dim = spec.dimension if spec else EXPECTED_GEMINI_EMBEDDING_DIMENSION
 
@@ -100,24 +137,19 @@ class GeminiProvider(BaseAIProvider):
 
                 valid_vec = self._validate_vector(list(raw_values), expected_dim=expected_dim)
                 embeddings.append(valid_vec)
-
             return embeddings
         except Exception as e:
             clean_err = sanitize_error_message(e)
             logger.error(f"Gemini embedding error: {clean_err}")
-            if str(clean_err).startswith("Gemini Embedding Error:"):
-                raise RuntimeError(clean_err)
             raise RuntimeError(f"Gemini Embedding Error: {clean_err}")
 
-    def embed_query(self, query: str) -> List[float]:
-        """Generates query embedding using Gemini API with strict validation and question-answering task formatting."""
-        if not query or not query.strip():
-            raise ValueError("Query text cannot be empty for embedding generation.")
+    def embed_query(self, query: str, model: Optional[str] = None) -> List[float]:
+        """Generates query embedding using Gemini API with strict validation."""
         if not self.is_configured():
             raise ValueError("Google Gemini provider is not configured.")
 
         api_key = Config.get_gemini_api_key()
-        model_name = self.get_embedding_model_name()
+        model_name = model or self.get_embedding_model_name()
         spec = Config.get_provider_spec("gemini")
         expected_dim = spec.dimension if spec else EXPECTED_GEMINI_EMBEDDING_DIMENSION
 
@@ -131,10 +163,9 @@ class GeminiProvider(BaseAIProvider):
                 output_dimensionality=expected_dim
             )
 
-            formatted_query = f"task: question answering | query: {query.strip()}"
             res = client.models.embed_content(
                 model=model_name,
-                contents=formatted_query,
+                contents=f"task: question answering | query: {query}",
                 config=config
             )
             raw_values = None
@@ -146,35 +177,35 @@ class GeminiProvider(BaseAIProvider):
             if raw_values is None:
                 raise RuntimeError("Gemini Embedding Error: No embedding values found in Gemini API response.")
 
-            valid_vec = self._validate_vector(list(raw_values), expected_dim=expected_dim)
-            return valid_vec
+            return self._validate_vector(list(raw_values), expected_dim=expected_dim)
         except Exception as e:
             clean_err = sanitize_error_message(e)
             logger.error(f"Gemini query embedding error: {clean_err}")
-            if str(clean_err).startswith("Gemini Embedding Error:"):
-                raise RuntimeError(clean_err)
             raise RuntimeError(f"Gemini Embedding Error: {clean_err}")
 
-    def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
-        """Generates chat completion using Gemini API."""
+    def generate(self, prompt: str, system_prompt: Optional[str] = None, model: Optional[str] = None) -> str:
+        """Generates completion using Gemini API."""
         if not self.is_configured():
             raise ValueError("Google Gemini provider is not configured.")
 
         api_key = Config.get_gemini_api_key()
-        model_name = self.get_chat_model_name()
+        model_name = model or self.get_chat_model_name()
 
         try:
             from google import genai
+            from google.genai import types
             client = genai.Client(api_key=api_key)
             logger.info(f"Generating Gemini completion (model: '{model_name}')")
 
-            full_prompt = prompt
-            if system_prompt:
-                full_prompt = f"System Instruction:\n{system_prompt}\n\nUser Question:\n{prompt}"
+            config = types.GenerateContentConfig(
+                system_instruction=system_prompt if system_prompt else None,
+                temperature=0.2
+            )
 
             response = client.models.generate_content(
                 model=model_name,
-                contents=full_prompt
+                contents=prompt,
+                config=config
             )
             return response.text or ""
         except Exception as e:

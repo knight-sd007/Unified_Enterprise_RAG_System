@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+RUN mkdir -p /build/data && chown -R 65532:65532 /build/data
 
 
 # ------------------------------------------------------------------------------
@@ -78,6 +79,7 @@ COPY --from=python-builder /install/lib/python3.12/site-packages /usr/local/lib/
 COPY --from=python-builder /install/bin/uvicorn /usr/local/bin/uvicorn
 
 # Copy backend application source code with nonroot ownership (UID: 65532)
+COPY --from=python-builder --chown=65532:65532 /build/data ./data
 COPY --chown=65532:65532 api/ ./api/
 COPY --chown=65532:65532 config/ ./config/
 COPY --chown=65532:65532 providers/ ./providers/
