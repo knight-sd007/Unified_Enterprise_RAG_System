@@ -335,5 +335,231 @@ class TestGoogleOAuthAndDrive(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(file_id, "drive_file_id_999")
 
+    # -------------------------------------------------------------------------
+    # GET /api/v1/auth/google/callback Tests (Browser Redirect Flow)
+    # -------------------------------------------------------------------------
+
+    @patch("httpx.AsyncClient.post")
+    @patch("httpx.AsyncClient.get")
+    def test_google_oauth_callback_get_regular_user_success(self, mock_get, mock_post):
+        """GET /api/v1/auth/google/callback provisions user session and returns HTTP 303 redirect to /."""
+        url_res = self.client.get("/api/v1/auth/google/url")
+        self.assertEqual(url_res.status_code, 200)
+        state = url_res.json()["state"]
+
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"access_token": "mock_at_get", "refresh_token": "mock_rt_get"},
+        )
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"sub": "get_sub_123", "email": "employee@enterprise.com", "email_verified": True},
+        )
+
+        res = self.client.get(
+            f"/api/v1/auth/google/callback?code=valid_get_code&state={state}",
+            follow_redirects=False,
+        )
+        self.assertEqual(res.status_code, 303)
+        self.assertEqual(res.headers.get("location"), "/")
+
+        # Session cookie issued
+        self.assertIn("p06_session", res.cookies)
+        # OAuth state cookie deleted/expired
+        set_cookie_header = res.headers.get("set-cookie", "")
+        self.assertIn("p06_oauth_state=", set_cookie_header)
+
+        # Authenticated session can access /status
+        status_res = self.client.get("/api/v1/auth/status")
+        self.assertEqual(status_res.status_code, 200)
+        status_data = status_res.json()
+        self.assertTrue(status_data["authenticated"])
+        self.assertEqual(status_data["user_id"], "google_get_sub_123")
+        self.assertEqual(status_data["role"], "user")
+        self.assertTrue(status_data["drive_authorized"])
+
+    @patch("httpx.AsyncClient.post")
+    @patch("httpx.AsyncClient.get")
+    def test_google_oauth_callback_get_admin_user_verified(self, mock_get, mock_post):
+        """GET /api/v1/auth/google/callback grants admin role to verified admin email and redirects 303 to /."""
+        url_res = self.client.get("/api/v1/auth/google/url")
+        self.assertEqual(url_res.status_code, 200)
+        state = url_res.json()["state"]
+
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"access_token": "mock_at", "refresh_token": "mock_rt"},
+        )
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"sub": "admin_sub_456", "email": "admin@enterprise.com", "email_verified": True},
+        )
+
+        res = self.client.get(
+            f"/api/v1/auth/google/callback?code=valid_code&state={state}",
+            follow_redirects=False,
+        )
+        self.assertEqual(res.status_code, 303)
+        self.assertEqual(res.headers.get("location"), "/")
+
+        status_res = self.client.get("/api/v1/auth/status")
+        self.assertEqual(status_res.json().get("role"), "admin")
+
+    @patch("httpx.AsyncClient.post")
+    @patch("httpx.AsyncClient.get")
+    def test_google_oauth_callback_get_unverified_email_downgraded_to_user(self, mock_get, mock_post):
+        """GET /api/v1/auth/google/callback keeps user role if admin email is unverified."""
+        url_res = self.client.get("/api/v1/auth/google/url")
+        self.assertEqual(url_res.status_code, 200)
+        state = url_res.json()["state"]
+
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"access_token": "mock_at", "refresh_token": "mock_rt"},
+        )
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"sub": "fake_admin_789", "email": "admin@enterprise.com", "email_verified": False},
+        )
+
+        res = self.client.get(
+            f"/api/v1/auth/google/callback?code=valid_code&state={state}",
+            follow_redirects=False,
+        )
+        self.assertEqual(res.status_code, 303)
+        self.assertEqual(res.headers.get("location"), "/")
+
+        status_res = self.client.get("/api/v1/auth/status")
+        self.assertEqual(status_res.json().get("role"), "user")
+
+    def test_google_oauth_callback_get_missing_state_fails(self):
+        """GET callback with missing state parameter is rejected with 400 INVALID_OAUTH_STATE."""
+        res = self.client.get("/api/v1/auth/google/callback?code=valid_code")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["error"]["code"], "INVALID_OAUTH_STATE")
+
+    def test_google_oauth_callback_get_missing_cookie_fails(self):
+        """GET callback with missing oauth_state cookie is rejected with 400 INVALID_OAUTH_STATE."""
+        client_no_cookie = TestClient(app)
+        res = client_no_cookie.get("/api/v1/auth/google/callback?code=valid_code&state=some_state")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["error"]["code"], "INVALID_OAUTH_STATE")
+
+    def test_google_oauth_callback_get_mismatched_state_fails(self):
+        """GET callback with mismatched state is rejected with 400 OAUTH_STATE_MISMATCH."""
+        url_res = self.client.get("/api/v1/auth/google/url")
+        self.assertEqual(url_res.status_code, 200)
+
+        res = self.client.get("/api/v1/auth/google/callback?code=valid_code&state=wrong_mismatched_state")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["error"]["code"], "OAUTH_STATE_MISMATCH")
+
+    def test_google_oauth_callback_get_invalid_tampered_cookie_fails(self):
+        """GET callback with tampered cookie is rejected with 400 EXPIRED_OAUTH_STATE."""
+        self.client.cookies.set("p06_oauth_state", "forged_tampered_cookie_value")
+        res = self.client.get("/api/v1/auth/google/callback?code=valid_code&state=some_state")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["error"]["code"], "EXPIRED_OAUTH_STATE")
+
+    def test_google_oauth_callback_get_missing_code_fails(self):
+        """GET callback with missing code is rejected with 400 INVALID_OAUTH_CODE."""
+        url_res = self.client.get("/api/v1/auth/google/url")
+        self.assertEqual(url_res.status_code, 200)
+        state = url_res.json()["state"]
+
+        res = self.client.get(f"/api/v1/auth/google/callback?state={state}")
+        self.assertEqual(res.status_code, 400)
+        self.assertEqual(res.json()["error"]["code"], "INVALID_OAUTH_CODE")
+
+    def test_google_oauth_callback_get_oauth_error_response_redirects_safely(self):
+        """GET callback when Google returns OAuth error redirects to /?error=... and deletes state cookie."""
+        url_res = self.client.get("/api/v1/auth/google/url")
+        self.assertEqual(url_res.status_code, 200)
+        self.assertIn("p06_oauth_state", url_res.cookies)
+
+        res = self.client.get(
+            "/api/v1/auth/google/callback?error=access_denied&error_description=The+user+denied+access",
+            follow_redirects=False,
+        )
+        self.assertEqual(res.status_code, 303)
+        self.assertEqual(res.headers.get("location"), "/?error=access_denied")
+        # Ensure state cookie is deleted
+        set_cookie_header = res.headers.get("set-cookie", "")
+        self.assertIn("p06_oauth_state=", set_cookie_header)
+        # Ensure no session cookie was created
+        self.assertNotIn("p06_session", res.cookies)
+
+    def test_google_oauth_callback_get_oauth_error_sanitizes_open_redirect(self):
+        """GET callback strictly prevents open redirects when error contains hostile payload."""
+        res = self.client.get(
+            "/api/v1/auth/google/callback?error=https://evil.com/leak&error_description=attack",
+            follow_redirects=False,
+        )
+        self.assertEqual(res.status_code, 303)
+        self.assertEqual(res.headers.get("location"), "/?error=httpsevilcomleak")
+        self.assertTrue(res.headers.get("location", "").startswith("/?error="))
+
+    @patch("httpx.AsyncClient.post")
+    def test_google_oauth_callback_get_failed_token_exchange(self, mock_post):
+        """GET callback with failed upstream Google token exchange returns 401 OAUTH_EXCHANGE_FAILED."""
+        url_res = self.client.get("/api/v1/auth/google/url")
+        self.assertEqual(url_res.status_code, 200)
+        state = url_res.json()["state"]
+
+        mock_post.return_value = MagicMock(status_code=400, text="Bad Request from Google")
+
+        res = self.client.get(f"/api/v1/auth/google/callback?code=bad_code&state={state}")
+        self.assertEqual(res.status_code, 401)
+        self.assertEqual(res.json()["error"]["code"], "OAUTH_EXCHANGE_FAILED")
+
+    @patch("httpx.AsyncClient.post")
+    @patch("httpx.AsyncClient.get")
+    def test_google_oauth_callback_get_failed_userinfo(self, mock_get, mock_post):
+        """GET callback with failed upstream Google userinfo lookup returns 401 OAUTH_USERINFO_FAILED."""
+        url_res = self.client.get("/api/v1/auth/google/url")
+        self.assertEqual(url_res.status_code, 200)
+        state = url_res.json()["state"]
+
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"access_token": "mock_at", "refresh_token": "mock_rt"},
+        )
+        mock_get.return_value = MagicMock(status_code=401, text="Unauthorized token")
+
+        res = self.client.get(f"/api/v1/auth/google/callback?code=valid_code&state={state}")
+        self.assertEqual(res.status_code, 401)
+        self.assertEqual(res.json()["error"]["code"], "OAUTH_USERINFO_FAILED")
+
+    @patch("httpx.AsyncClient.post")
+    @patch("httpx.AsyncClient.get")
+    def test_google_oauth_callback_get_state_replay_fails(self, mock_get, mock_post):
+        """GET callback state cookie cannot be replayed after single successful usage."""
+        url_res = self.client.get("/api/v1/auth/google/url")
+        self.assertEqual(url_res.status_code, 200)
+        state = url_res.json()["state"]
+
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"access_token": "mock_at", "refresh_token": "mock_rt"},
+        )
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"sub": "user_replay_get", "email": "replay_get@test.com", "email_verified": True},
+        )
+
+        res1 = self.client.get(
+            f"/api/v1/auth/google/callback?code=code_1&state={state}",
+            follow_redirects=False,
+        )
+        self.assertEqual(res1.status_code, 303)
+
+        res2 = self.client.get(
+            f"/api/v1/auth/google/callback?code=code_2&state={state}",
+            follow_redirects=False,
+        )
+        self.assertEqual(res2.status_code, 400)
+        self.assertEqual(res2.json()["error"]["code"], "INVALID_OAUTH_STATE")
+
+
 if __name__ == "__main__":
     unittest.main()

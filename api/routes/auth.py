@@ -5,7 +5,8 @@ import secrets
 from urllib.parse import quote
 from typing import Optional
 import httpx
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Query, Request, Response, status
+from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from api.dependencies import (
@@ -185,16 +186,15 @@ async def get_google_auth_url(response: Response) -> GoogleAuthUrlResponse:
     return GoogleAuthUrlResponse(url=auth_url, state=raw_state)
 
 
-@router.post(
-    "/google/callback",
-    response_model=LoginResponse,
-    summary="Google OAuth Callback & Token Exchange",
-    description="Exchanges Google authorization code for tokens, validates server-bound anti-CSRF state, verifies identity and email status, and issues a session cookie.",
-)
-async def google_oauth_callback(
-    request: Request, payload: GoogleOAuthCallbackRequest, response: Response
+async def _process_google_oauth_exchange(
+    request: Request,
+    code: str,
+    state: Optional[str],
+    response: Response,
 ) -> LoginResponse:
-    """Exchanges Google authorization code, validates CSRF state, and provisions authenticated session."""
+    """Shared internal helper for exchanging Google authorization code, validating anti-CSRF state,
+    persisting tokens, and provisioning authenticated session.
+    """
     if not Config.is_google_oauth_configured():
         raise APIError(
             status_code=400,
@@ -204,7 +204,7 @@ async def google_oauth_callback(
 
     # 1. Anti-CSRF server-bound state validation
     state_cookie = request.cookies.get(OAUTH_STATE_COOKIE_NAME)
-    if not state_cookie or not payload.state:
+    if not state_cookie or not state:
         response.delete_cookie(key=OAUTH_STATE_COOKIE_NAME, path="/")
         raise APIError(
             status_code=400,
@@ -221,7 +221,7 @@ async def google_oauth_callback(
             message="OAuth anti-CSRF state token is invalid or expired.",
         )
 
-    if not hmac.compare_digest(verified_raw_state, payload.state):
+    if not hmac.compare_digest(verified_raw_state, state):
         response.delete_cookie(key=OAUTH_STATE_COOKIE_NAME, path="/")
         raise APIError(
             status_code=400,
@@ -242,7 +242,7 @@ async def google_oauth_callback(
             token_resp = await http_client.post(
                 "https://oauth2.googleapis.com/token",
                 data={
-                    "code": payload.code,
+                    "code": code,
                     "client_id": client_id,
                     "client_secret": client_secret,
                     "redirect_uri": redirect_uri,
@@ -339,6 +339,64 @@ async def google_oauth_callback(
             code="OAUTH_INTERNAL_ERROR",
             message="An error occurred while completing Google authentication.",
         )
+
+
+@router.get(
+    "/google/callback",
+    summary="Google OAuth Browser Callback",
+    description="Handles browser redirect from Google OAuth, exchanges authorization code for tokens, sets session cookie, and redirects user to application root.",
+    response_class=RedirectResponse,
+    status_code=status.HTTP_303_SEE_OTHER,
+)
+async def google_oauth_callback_get(
+    request: Request,
+    code: Optional[str] = Query(None, description="Google OAuth authorization code"),
+    state: Optional[str] = Query(None, description="OAuth anti-CSRF state token"),
+    error: Optional[str] = Query(None, description="Google OAuth error code if authorization failed"),
+    error_description: Optional[str] = Query(None, description="Description of authorization error"),
+) -> RedirectResponse:
+    """Handles browser redirect from Google OAuth, validates CSRF state, and redirects to SPA with session."""
+    # Handle Google OAuth errors safely without token exchange or open redirect
+    if error:
+        safe_error = re.sub(r"[^a-zA-Z0-9_\-]", "", error)[:64] or "oauth_error"
+        logger.warning(f"Google OAuth callback received error '{safe_error}': {error_description or ''}")
+        redirect_res = RedirectResponse(url=f"/?error={safe_error}", status_code=status.HTTP_303_SEE_OTHER)
+        redirect_res.delete_cookie(key=OAUTH_STATE_COOKIE_NAME, path="/")
+        return redirect_res
+
+    if not code or not code.strip():
+        raise APIError(
+            status_code=400,
+            code="INVALID_OAUTH_CODE",
+            message="OAuth authorization code is missing.",
+        )
+
+    redirect_res = RedirectResponse(url="/", status_code=status.HTTP_303_SEE_OTHER)
+    await _process_google_oauth_exchange(
+        request=request,
+        code=code.strip(),
+        state=state,
+        response=redirect_res,
+    )
+    return redirect_res
+
+
+@router.post(
+    "/google/callback",
+    response_model=LoginResponse,
+    summary="Google OAuth Callback & Token Exchange",
+    description="Exchanges Google authorization code for tokens, validates server-bound anti-CSRF state, verifies identity and email status, and issues a session cookie.",
+)
+async def google_oauth_callback(
+    request: Request, payload: GoogleOAuthCallbackRequest, response: Response
+) -> LoginResponse:
+    """Exchanges Google authorization code, validates CSRF state, and provisions authenticated session."""
+    return await _process_google_oauth_exchange(
+        request=request,
+        code=payload.code,
+        state=payload.state,
+        response=response,
+    )
 
 
 @router.get(
