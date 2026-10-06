@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, LogOut, Cpu, Database, UserCheck, ShieldAlert, Shield } from 'lucide-react';
+import { Activity, LogOut, Cpu, Database, UserCheck, ShieldAlert, Shield, Cloud, CloudOff } from 'lucide-react';
 import { ProviderHealthItem, ProviderMetadata } from '../types/api';
 
 interface HeaderProps {
@@ -12,6 +12,8 @@ interface HeaderProps {
   providerHealthList: ProviderHealthItem[];
   currentUser?: string;
   currentRole?: string;
+  authType?: string;
+  driveAuthorized?: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -24,8 +26,11 @@ export const Header: React.FC<HeaderProps> = ({
   providerHealthList,
   currentUser = 'default_user',
   currentRole = 'user',
+  authType = 'google',
+  driveAuthorized = false,
 }) => {
   const isAdmin = currentRole === 'admin';
+  const isAdminKeyOnly = authType === 'admin_key';
   const activeHealth = providerHealthList.find((h) => h.provider_id === selectedProvider);
   const activeProvider = providers.find((p) => p.provider_id === selectedProvider);
 
@@ -92,6 +97,33 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="max-w-[120px] truncate">{currentUser}</span>
             {isAdmin && <span className="text-[10px] uppercase font-bold text-amber-400">[Admin]</span>}
           </div>
+
+          {/* Google Drive Status Badge */}
+          {isAdminKeyOnly ? (
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-amber-500/30 bg-amber-950/30 text-amber-300 text-xs font-medium"
+              title="Admin break-glass key session has no document workspace access."
+            >
+              <CloudOff className="w-3.5 h-3.5 text-amber-400" />
+              <span>Admin Key (No Workspace)</span>
+            </div>
+          ) : driveAuthorized ? (
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-emerald-500/30 bg-emerald-950/30 text-emerald-400 text-xs font-medium"
+              title="Google Drive connected for original document synchronization."
+            >
+              <Cloud className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Drive Sync Active</span>
+            </div>
+          ) : (
+            <div
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-amber-500/30 bg-amber-950/30 text-amber-300 text-xs font-medium"
+              title="Google Drive authorization required for document ingestion."
+            >
+              <CloudOff className="w-3.5 h-3.5 text-amber-400" />
+              <span>Drive Auth Required</span>
+            </div>
+          )}
 
           {/* Accurate Provider Health Pill */}
           <div

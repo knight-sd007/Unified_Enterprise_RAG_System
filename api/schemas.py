@@ -37,6 +37,8 @@ class LoginResponse(BaseModel):
     authenticated: bool = Field(True, description="Indicates active authenticated session.")
     user_id: str = Field("default_user", description="Authenticated user identifier.")
     role: str = Field("user", description="Session role ('user' or 'admin').")
+    auth_type: Optional[str] = Field("google", description="Authentication mechanism ('google' or 'admin_key').")
+    drive_authorized: bool = Field(False, description="Whether Google Drive authorization is active.")
     message: str = Field("Authentication successful.", description="Status message.")
 
 
@@ -45,6 +47,8 @@ class AuthStatusResponse(BaseModel):
     authenticated: bool = Field(..., description="Whether current session is authenticated.")
     user_id: Optional[str] = Field(None, description="Authenticated user identifier.")
     role: Optional[str] = Field(None, description="Session role ('user' or 'admin').")
+    auth_type: Optional[str] = Field(None, description="Authentication mechanism ('google' or 'admin_key').")
+    drive_authorized: bool = Field(False, description="Whether Google Drive authorization is active.")
 
 
 class LogoutResponse(BaseModel):

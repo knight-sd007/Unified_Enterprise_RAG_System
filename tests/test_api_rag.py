@@ -10,31 +10,38 @@ from api.main import app
 from rag.chunker import Chunk
 from rag.pipeline import RAGPipeline
 from rag.vector_store import InMemoryVectorStore
+from rag.storage.metadata_db import get_metadata_repo
 
 
 class TestAPIRAGOperations(unittest.TestCase):
     """Test suite for /api/v1/rag/* routes (query, stats, index clearing)."""
 
     def setUp(self):
-        self.key_patcher = patch("config.settings.Config.get_app_access_key", return_value="test-app-key-123")
         self.admin_key_patcher = patch("config.settings.Config.get_admin_access_key", return_value="test-admin-key-999")
         self.session_key_patcher = patch("config.settings.Config.get_session_signing_key", return_value="test-signing-key-789")
-        self.key_patcher.start()
         self.admin_key_patcher.start()
         self.session_key_patcher.start()
         self.client = TestClient(app)
-        self.auth_token = create_session_token()
+        self.auth_token = create_session_token(role="user", user_id="google_12345", auth_type="google")
         self.auth_headers = {"Authorization": f"Bearer {self.auth_token}"}
         # Use isolated in-memory vector store and pipeline for tests
         self.mock_store = InMemoryVectorStore()
         self.pipeline = RAGPipeline(vector_store=self.mock_store)
         set_rag_pipeline(self.pipeline)
 
+        # Seed OAuth tokens in SQLite for Google Drive access
+        get_metadata_repo().save_oauth_tokens(
+            user_id="google_12345",
+            provider="google",
+            token_data={"access_token": "ya29.mock_token", "refresh_token": "mock_refresh"},
+        )
+
     def tearDown(self):
+        get_metadata_repo().delete_all_global()
+        get_metadata_repo().delete_oauth_tokens("google_12345", "google")
         set_rag_pipeline(None)
         self.session_key_patcher.stop()
         self.admin_key_patcher.stop()
-        self.key_patcher.stop()
 
     # -------------------------------------------------------------------------
     # Authentication Enforcement Tests
@@ -48,6 +55,18 @@ class TestAPIRAGOperations(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.json()["error"]["code"], "UNAUTHORIZED")
+
+    def test_admin_key_session_query_rejected(self):
+        """ADMIN_ACCESS_KEY break-glass session is blocked from RAG queries with 403."""
+        admin_key_token = create_session_token(role="admin", user_id="admin_console", auth_type="admin_key")
+        headers = {"Authorization": f"Bearer {admin_key_token}"}
+        response = self.client.post(
+            "/api/v1/rag/query",
+            headers=headers,
+            json={"query": "What are the compliance rules?"},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.json()["error"]["code"], "ADMIN_KEY_WORKSPACE_RESTRICTED")
 
     def test_unauthenticated_stats_rejected(self):
         """Unauthenticated GET /api/v1/rag/stats is rejected with 401."""
@@ -69,13 +88,13 @@ class TestAPIRAGOperations(unittest.TestCase):
     @patch("providers.gemini_provider.GeminiProvider.embed_query")
     @patch("providers.gemini_provider.GeminiProvider.generate")
     def test_successful_query_with_grounded_answer(self, mock_gen, mock_embed_q, _mock_conf):
-        """Authenticated query returns grounded answer with full source citation details."""
-        # Seed the in-memory store with a Gemini vector
+        """Authenticated Google query returns grounded answer with full source citation details."""
+        # Seed the in-memory store with a Gemini vector scoped to user
         chunk = Chunk(
             content="Section 4 requires all enterprise logs to be encrypted with AES-256.",
-            metadata={"filename": "security_policy.pdf", "chunk_id": "chunk_0"},
+            metadata={"filename": "security_policy.pdf", "chunk_id": "chunk_0", "owner_id": "google_12345"},
         )
-        self.mock_store.add_chunks([chunk], [[0.1] * 768], "gemini")
+        self.mock_store.add_chunks([chunk], [[0.1] * 768], "gemini", owner_id="google_12345")
 
         mock_embed_q.return_value = [0.1] * 768
         mock_gen.return_value = "Enterprise logs must be encrypted using AES-256 as specified in Section 4."
@@ -140,9 +159,9 @@ class TestAPIRAGOperations(unittest.TestCase):
         """Attempting to query OpenAI against an index created with Gemini is rejected."""
         chunk = Chunk(
             content="Gemini chunk.",
-            metadata={"filename": "doc.txt", "chunk_id": "c0"},
+            metadata={"filename": "doc.txt", "chunk_id": "c0", "owner_id": "google_12345"},
         )
-        self.mock_store.add_chunks([chunk], [[0.1] * 768], "gemini")
+        self.mock_store.add_chunks([chunk], [[0.1] * 768], "gemini", owner_id="google_12345")
 
         response = self.client.post(
             "/api/v1/rag/query",
@@ -175,9 +194,9 @@ class TestAPIRAGOperations(unittest.TestCase):
         """GET /api/v1/rag/stats reflects indexed chunk count and vector properties."""
         chunk = Chunk(
             content="Sample text.",
-            metadata={"filename": "doc.txt", "chunk_id": "c0"},
+            metadata={"filename": "doc.txt", "chunk_id": "c0", "owner_id": "google_12345"},
         )
-        self.mock_store.add_chunks([chunk], [[0.1] * 768], "gemini")
+        self.mock_store.add_chunks([chunk], [[0.1] * 768], "gemini", owner_id="google_12345")
 
         response = self.client.get(
             "/api/v1/rag/stats",
@@ -218,12 +237,12 @@ class TestAPIRAGOperations(unittest.TestCase):
         """DELETE /api/v1/rag/index called by admin user clears global vector index."""
         chunk = Chunk(
             content="Content to clear.",
-            metadata={"filename": "doc.txt", "chunk_id": "c0", "owner_id": "default_user"},
+            metadata={"filename": "doc.txt", "chunk_id": "c0", "owner_id": "google_12345"},
         )
-        self.mock_store.add_chunks([chunk], [[0.1] * 768], "gemini", owner_id="default_user")
+        self.mock_store.add_chunks([chunk], [[0.1] * 768], "gemini", owner_id="google_12345")
         self.assertEqual(self.mock_store.count(), 1)
 
-        admin_token = create_session_token(user_id="admin_user", role="admin")
+        admin_token = create_session_token(user_id="google_admin", role="admin", auth_type="google")
         admin_headers = {"Authorization": f"Bearer {admin_token}"}
 
         response = self.client.delete(

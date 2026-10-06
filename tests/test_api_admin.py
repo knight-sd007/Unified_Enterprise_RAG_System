@@ -143,6 +143,106 @@ class TestAPIAdminConsole(unittest.TestCase):
         self.assertEqual(len(repo.list_documents()), 0)
         self.assertEqual(self.store.get_stats()["count"], 0)
 
+    def test_admin_global_purge_first_collection_failure_preserves_metadata(self):
+        """Failure: First vector collection fails -> SQLite metadata remains untouched -> HTTP 500."""
+        repo = get_metadata_repo()
+        repo.save_document(
+            doc_id="doc_fail1",
+            owner_id="alice",
+            filename="critical.pdf",
+            file_size=1024,
+            char_count=200,
+            provider_id="gemini",
+            embedding_model="gemini-embedding-2",
+            chunk_count=2,
+        )
+
+        with patch.object(self.pipeline, "clear_index", side_effect=RuntimeError("Qdrant connection timeout on collection 1")):
+            res = self.client.post(
+                "/api/v1/admin/vectors/clear",
+                headers=self.admin_headers,
+                json={"confirmation": "CONFIRM_ADMIN_GLOBAL_PURGE"},
+            )
+            self.assertEqual(res.status_code, 500)
+            self.assertIn("Global vector purge failed", res.json()["error"]["message"])
+
+        # Crucial assertion: SQLite metadata MUST NOT have been deleted
+        remaining_docs = repo.list_documents()
+        self.assertEqual(len(remaining_docs), 1)
+        self.assertEqual(remaining_docs[0]["doc_id"], "doc_fail1")
+
+    def test_admin_global_purge_later_collection_failure_preserves_metadata(self):
+        """Later collection failure: Earlier collection cleared, later fails -> SQLite metadata remains untouched -> HTTP 500."""
+        repo = get_metadata_repo()
+        repo.save_document(
+            doc_id="doc_fail2",
+            owner_id="bob",
+            filename="ledger.pdf",
+            file_size=4096,
+            char_count=800,
+            provider_id="openai",
+            embedding_model="text-embedding-3-small",
+            chunk_count=5,
+        )
+
+        with patch.object(self.pipeline, "clear_index", side_effect=RuntimeError("Qdrant quota exceeded on collection 2")):
+            res = self.client.post(
+                "/api/v1/admin/vectors/clear",
+                headers=self.admin_headers,
+                json={"confirmation": "CONFIRM_ADMIN_GLOBAL_PURGE"},
+            )
+            self.assertEqual(res.status_code, 500)
+            self.assertIn("Global vector purge failed", res.json()["error"]["message"])
+
+        # Crucial assertion: SQLite metadata MUST NOT have been deleted
+        remaining_docs = repo.list_documents()
+        self.assertEqual(len(remaining_docs), 1)
+        self.assertEqual(remaining_docs[0]["doc_id"], "doc_fail2")
+
+    def test_admin_global_purge_retry_is_idempotent(self):
+        """Retry: A subsequent global purge after partial failure or on empty store succeeds safely."""
+        repo = get_metadata_repo()
+        repo.save_document(
+            doc_id="doc_retry",
+            owner_id="alice",
+            filename="retry.pdf",
+            file_size=1024,
+            char_count=200,
+            provider_id="gemini",
+            embedding_model="gemini-embedding-2",
+            chunk_count=1,
+        )
+
+        # 1. First attempt fails due to simulated transient error
+        with patch.object(self.pipeline, "clear_index", side_effect=RuntimeError("Transient network failure")):
+            res1 = self.client.post(
+                "/api/v1/admin/vectors/clear",
+                headers=self.admin_headers,
+                json={"confirmation": "CONFIRM_ADMIN_GLOBAL_PURGE"},
+            )
+            self.assertEqual(res1.status_code, 500)
+
+        # Metadata remains
+        self.assertEqual(len(repo.list_documents()), 1)
+
+        # 2. Retry succeeds
+        res2 = self.client.post(
+            "/api/v1/admin/vectors/clear",
+            headers=self.admin_headers,
+            json={"confirmation": "CONFIRM_ADMIN_GLOBAL_PURGE"},
+        )
+        self.assertEqual(res2.status_code, 200)
+        self.assertEqual(len(repo.list_documents()), 0)
+
+        # 3. Another subsequent purge on empty store is safe and returns 200
+        res3 = self.client.post(
+            "/api/v1/admin/vectors/clear",
+            headers=self.admin_headers,
+            json={"confirmation": "CONFIRM_ADMIN_GLOBAL_PURGE"},
+        )
+        self.assertEqual(res3.status_code, 200)
+        self.assertEqual(res3.json()["purged_documents"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

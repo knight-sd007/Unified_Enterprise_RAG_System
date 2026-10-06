@@ -13,10 +13,8 @@ class TestAPIAuth(unittest.TestCase):
     """Test suite for /api/v1/auth routes and session lifecycle."""
 
     def setUp(self):
-        self.app_key_patcher = patch("config.settings.Config.get_app_access_key", return_value="test-access-key-123")
         self.admin_key_patcher = patch("config.settings.Config.get_admin_access_key", return_value="test-admin-key-456")
         self.signing_key_patcher = patch("config.settings.Config.get_session_signing_key", return_value="test-signing-key-789")
-        self.app_key_patcher.start()
         self.admin_key_patcher.start()
         self.signing_key_patcher.start()
         self.client = TestClient(app)
@@ -24,16 +22,16 @@ class TestAPIAuth(unittest.TestCase):
     def tearDown(self):
         self.signing_key_patcher.stop()
         self.admin_key_patcher.stop()
-        self.app_key_patcher.stop()
 
-    def test_login_success_with_valid_key(self):
-        """Valid access key succeeds and sets HttpOnly session cookie."""
-        response = self.client.post("/api/v1/auth/login", json={"access_key": "test-access-key-123"})
+    def test_login_success_with_admin_key(self):
+        """Valid admin access key succeeds and sets role='admin', auth_type='admin_key'."""
+        response = self.client.post("/api/v1/auth/login", json={"access_key": "test-admin-key-456"})
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data.get("authenticated"))
-        self.assertEqual(data.get("role"), "user")
-        self.assertEqual(data.get("message"), "Authentication successful.")
+        self.assertEqual(data.get("role"), "admin")
+        self.assertEqual(data.get("auth_type"), "admin_key")
+        self.assertFalse(data.get("drive_authorized"))
 
         # Check session cookie
         self.assertIn(SESSION_COOKIE_NAME, response.cookies)
@@ -41,16 +39,17 @@ class TestAPIAuth(unittest.TestCase):
         self.assertTrue(len(cookie_val) > 20)
 
         # Confirm access key itself is NOT in response or cookie value
-        self.assertNotIn("test-access-key-123", response.text)
-        self.assertNotIn("test-access-key-123", cookie_val)
+        self.assertNotIn("test-admin-key-456", response.text)
+        self.assertNotIn("test-admin-key-456", cookie_val)
 
-    def test_login_success_with_admin_key(self):
-        """Valid admin access key succeeds and sets role='admin'."""
-        response = self.client.post("/api/v1/auth/login", json={"access_key": "test-admin-key-456"})
-        self.assertEqual(response.status_code, 200)
+    def test_login_failure_with_normal_app_key(self):
+        """APP_ACCESS_KEY or non-admin key is rejected for normal login (Google OAuth required)."""
+        response = self.client.post("/api/v1/auth/login", json={"access_key": "some-normal-user-key"})
+        self.assertEqual(response.status_code, 401)
         data = response.json()
-        self.assertTrue(data.get("authenticated"))
-        self.assertEqual(data.get("role"), "admin")
+        self.assertIn("error", data)
+        self.assertEqual(data["error"]["code"], "AUTHENTICATION_FAILED")
+        self.assertNotIn(SESSION_COOKIE_NAME, response.cookies)
 
     def test_login_failure_with_invalid_key(self):
         """Invalid access key returns 401 with structured AUTHENTICATION_FAILED error."""
@@ -59,7 +58,7 @@ class TestAPIAuth(unittest.TestCase):
         data = response.json()
         self.assertIn("error", data)
         self.assertEqual(data["error"]["code"], "AUTHENTICATION_FAILED")
-        self.assertEqual(data["error"]["message"], "Invalid access key.")
+        self.assertIn("Invalid administrator access key", data["error"]["message"])
         self.assertNotIn(SESSION_COOKIE_NAME, response.cookies)
 
     def test_login_failure_with_empty_key(self):
@@ -79,21 +78,23 @@ class TestAPIAuth(unittest.TestCase):
 
     def test_auth_status_authenticated_via_cookie(self):
         """GET /api/v1/auth/status returns authenticated: True when valid session cookie is provided."""
-        # 1. Login
-        login_res = self.client.post("/api/v1/auth/login", json={"access_key": "test-access-key-123"})
+        # 1. Login with admin key
+        login_res = self.client.post("/api/v1/auth/login", json={"access_key": "test-admin-key-456"})
         self.assertEqual(login_res.status_code, 200)
 
         # 2. Check status (TestClient retains cookies automatically)
         status_res = self.client.get("/api/v1/auth/status")
         self.assertEqual(status_res.status_code, 200)
         self.assertTrue(status_res.json().get("authenticated"))
+        self.assertEqual(status_res.json().get("auth_type"), "admin_key")
 
     def test_auth_status_authenticated_via_bearer_header(self):
         """Bearer token in Authorization header also authenticates session."""
-        token = create_session_token()
+        token = create_session_token(role="user", user_id="google_12345", auth_type="google")
         res = self.client.get("/api/v1/auth/status", headers={"Authorization": f"Bearer {token}"})
         self.assertEqual(res.status_code, 200)
         self.assertTrue(res.json().get("authenticated"))
+        self.assertEqual(res.json().get("user_id"), "google_12345")
 
     def test_auth_status_tampered_cookie_rejected(self):
         """Forged or malformed session cookie is rejected."""
@@ -105,7 +106,7 @@ class TestAPIAuth(unittest.TestCase):
     def test_logout_clears_session(self):
         """POST /api/v1/auth/logout invalidates session and clears cookie."""
         # 1. Login
-        self.client.post("/api/v1/auth/login", json={"access_key": "test-access-key-123"})
+        self.client.post("/api/v1/auth/login", json={"access_key": "test-admin-key-456"})
         self.assertTrue(self.client.get("/api/v1/auth/status").json().get("authenticated"))
 
         # 2. Logout
@@ -118,10 +119,9 @@ class TestAPIAuth(unittest.TestCase):
         self.assertEqual(status_res.status_code, 200)
         self.assertFalse(status_res.json().get("authenticated"))
 
-    def test_login_fails_when_access_key_not_configured(self):
-        """When server has no configured APP_ACCESS_KEY and no ADMIN_ACCESS_KEY, login returns 500."""
-        with patch("config.settings.Config.get_app_access_key", return_value=""), \
-             patch("config.settings.Config.get_admin_access_key", return_value=""):
+    def test_login_fails_when_admin_key_not_configured(self):
+        """When server has no configured ADMIN_ACCESS_KEY, login returns 500."""
+        with patch("config.settings.Config.get_admin_access_key", return_value=""):
             response = self.client.post("/api/v1/auth/login", json={"access_key": "any-key"})
             self.assertEqual(response.status_code, 500)
             data = response.json()
@@ -131,7 +131,7 @@ class TestAPIAuth(unittest.TestCase):
     def test_login_fails_when_session_signing_key_not_configured(self):
         """When SESSION_SIGNING_KEY is missing, login returns 500 AUTH_CONFIGURATION_ERROR."""
         with patch("config.settings.Config.get_session_signing_key", return_value=""):
-            response = self.client.post("/api/v1/auth/login", json={"access_key": "test-access-key-123"})
+            response = self.client.post("/api/v1/auth/login", json={"access_key": "test-admin-key-456"})
             self.assertEqual(response.status_code, 500)
             data = response.json()
             self.assertIn("error", data)

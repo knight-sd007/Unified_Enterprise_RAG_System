@@ -226,7 +226,7 @@ export const AdminConsoleModal: React.FC<AdminConsoleModalProps> = ({
                   Privileged Global Vector Purge
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  This administrative operation will permanently delete ALL indexed vector embeddings, chunk points, and document records across ALL users.
+                  This administrative operation will permanently delete ALL indexed vector embeddings and chunk points across ALL provider collections (Gemini, OpenAI, NVIDIA NIM) and purge SQLite metadata across ALL users.
                 </p>
 
                 {purgeResult && (

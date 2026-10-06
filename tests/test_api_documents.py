@@ -4,35 +4,57 @@ Unit tests for Document Ingestion API endpoints (/api/v1/documents/ingest).
 
 import io
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 from api.dependencies import create_session_token, set_rag_pipeline
 from api.main import app
-from rag.loaders import Document
 from rag.pipeline import RAGPipeline
 from rag.vector_store import InMemoryVectorStore
+from rag.storage.metadata_db import get_metadata_repo
 
 
 class TestAPIDocumentIngestion(unittest.TestCase):
     """Test suite for /api/v1/documents/ingest route."""
 
     def setUp(self):
-        self.key_patcher = patch("config.settings.Config.get_app_access_key", return_value="test-app-key-123")
         self.session_key_patcher = patch("config.settings.Config.get_session_signing_key", return_value="test-signing-key-789")
-        self.key_patcher.start()
         self.session_key_patcher.start()
         self.client = TestClient(app)
-        self.auth_token = create_session_token()
+        self.auth_token = create_session_token(role="user", user_id="google_12345", auth_type="google")
         self.auth_headers = {"Authorization": f"Bearer {self.auth_token}"}
         # Use isolated in-memory RAGPipeline for test suite
         self.mock_store = InMemoryVectorStore()
         self.pipeline = RAGPipeline(vector_store=self.mock_store)
         set_rag_pipeline(self.pipeline)
 
+        # Seed OAuth tokens in SQLite for Google Drive access
+        get_metadata_repo().save_oauth_tokens(
+            user_id="google_12345",
+            provider="google",
+            token_data={"access_token": "ya29.mock_drive_token", "refresh_token": "mock_refresh_token"},
+        )
+
+        # Patch GoogleDriveStorage async methods
+        self.drive_token_patcher = patch(
+            "rag.storage.google_drive.GoogleDriveStorage.get_valid_access_token",
+            new_callable=AsyncMock,
+            return_value="ya29.mock_drive_token",
+        )
+        self.drive_upload_patcher = patch(
+            "rag.storage.google_drive.GoogleDriveStorage.upload_file",
+            new_callable=AsyncMock,
+            return_value="mock_drive_file_id_123",
+        )
+        self.drive_token_patcher.start()
+        self.drive_upload_patcher.start()
+
     def tearDown(self):
+        self.drive_upload_patcher.stop()
+        self.drive_token_patcher.stop()
+        get_metadata_repo().delete_all_global()
+        get_metadata_repo().delete_oauth_tokens("google_12345", "google")
         set_rag_pipeline(None)
         self.session_key_patcher.stop()
-        self.key_patcher.stop()
 
     def test_unauthenticated_ingestion_rejected(self):
         """Unauthenticated request to /api/v1/documents/ingest is rejected with 401."""
@@ -45,10 +67,25 @@ class TestAPIDocumentIngestion(unittest.TestCase):
         data = response.json()
         self.assertEqual(data["error"]["code"], "UNAUTHORIZED")
 
+    def test_admin_key_only_session_rejected_from_workspace(self):
+        """ADMIN_ACCESS_KEY break-glass session is blocked from document ingestion with 403."""
+        admin_key_token = create_session_token(role="admin", user_id="admin_console", auth_type="admin_key")
+        headers = {"Authorization": f"Bearer {admin_key_token}"}
+        file_content = b"Admin trying to upload documents."
+        response = self.client.post(
+            "/api/v1/documents/ingest",
+            headers=headers,
+            data={"provider_id": "gemini"},
+            files={"files": ("policy.txt", io.BytesIO(file_content), "text/plain")},
+        )
+        self.assertEqual(response.status_code, 403)
+        data = response.json()
+        self.assertEqual(data["error"]["code"], "ADMIN_KEY_WORKSPACE_RESTRICTED")
+
     @patch("providers.gemini_provider.GeminiProvider.is_configured", return_value=True)
     @patch("providers.gemini_provider.GeminiProvider.embed_documents")
     def test_successful_txt_document_ingestion(self, mock_embed, _mock_conf):
-        """Authenticated user can successfully ingest a valid TXT document."""
+        """Authenticated Google user can successfully ingest a valid TXT document."""
         mock_embed.return_value = [[0.1] * 768]
         file_content = b"Enterprise standard operating procedures for data governance."
 

@@ -7,7 +7,12 @@ import os
 from typing import List, Optional
 from fastapi import APIRouter, Depends, File, Form, Path, Query, UploadFile
 
-from api.dependencies import APIError, UserSession, get_rag_pipeline, require_authentication
+from api.dependencies import (
+    APIError,
+    UserSession,
+    get_rag_pipeline,
+    require_workspace_access,
+)
 from api.schemas import (
     DocumentDeleteResponse,
     DocumentIngestResponse,
@@ -27,7 +32,7 @@ from utils.security import sanitize_error_message
 router = APIRouter(
     prefix="/documents",
     tags=["Documents"],
-    dependencies=[Depends(require_authentication)],
+    dependencies=[Depends(require_workspace_access)],
 )
 
 # Guardrails
@@ -51,7 +56,7 @@ async def ingest_documents(
     provider_id: Optional[str] = Form(None, description="Optional AI provider identifier ('openai', 'gemini', 'nvidia_nim'). Defaults to configured system provider."),
     chunk_size: Optional[int] = Form(500, description="Sliding-window chunk size in characters (100 to 2000)."),
     chunk_overlap: Optional[int] = Form(50, description="Sliding-window chunk overlap in characters (0 to 500)."),
-    session: UserSession = Depends(require_authentication),
+    session: UserSession = Depends(require_workspace_access),
     pipeline: RAGPipeline = Depends(get_rag_pipeline),
 ) -> DocumentIngestResponse:
     """Handles document upload, chunking, and vector embedding indexing with owner binding."""
@@ -87,12 +92,20 @@ async def ingest_documents(
             message=f"Provider '{provider.name}' is not configured with valid API credentials.",
         )
 
-    # 2. Read and parse uploaded files
+    # 2. Check Drive access token before reading files
+    drive_storage = GoogleDriveStorage()
+    token = await drive_storage.get_valid_access_token(session.user_id)
+    if not token:
+        raise APIError(
+            status_code=403,
+            code="DRIVE_AUTHORIZATION_REQUIRED",
+            message="Google Drive authorization has expired or is missing. Please sign in with Google to reconnect Drive.",
+        )
+
+    # 3. Read and parse uploaded files
     documents: List[Document] = []
     processed_filenames: List[str] = []
     file_bytes_map = {}
-
-    drive_storage = GoogleDriveStorage()
 
     for upload in files:
         raw_name = upload.filename or "uploaded_doc.txt"
@@ -153,13 +166,13 @@ async def ingest_documents(
                 message=f"Failed to parse file '{safe_name}': {clean_err}",
             )
 
-    # 3. Configure chunker parameters on pipeline
+    # 4. Configure chunker parameters on pipeline
     if chunk_size is not None:
         pipeline.chunker.chunk_size = max(100, min(2000, chunk_size))
     if chunk_overlap is not None:
         pipeline.chunker.chunk_overlap = max(0, min(500, chunk_overlap))
 
-    # 4. Ingest parsed documents into vector store
+    # 5. Ingest parsed documents into vector store
     res = pipeline.ingest_documents(documents, provider, owner_id=session.user_id)
 
     if res.get("status") == "error":
@@ -169,23 +182,19 @@ async def ingest_documents(
             message=res.get("message", "Document ingestion failed."),
         )
 
-    # 5. Persist document metadata in SQLite repository & sync with Drive if available
+    # 6. Store original in user's Google Drive & persist metadata in SQLite repository
     repo = get_metadata_repo()
     for doc in documents:
         doc_id = doc.metadata.get("doc_id")
         fname, c_bytes, ext = file_bytes_map.get(doc_id, (doc.metadata.get("filename", "unknown"), b"", ".txt"))
         mime_type = "application/pdf" if ext == ".pdf" else "text/plain"
 
-        drive_file_id = None
-        try:
-            drive_file_id = await drive_storage.upload_file(
-                owner_id=session.user_id,
-                filename=fname,
-                content=c_bytes,
-                mime_type=mime_type,
-            )
-        except Exception as e:
-            logger.warning(f"Drive upload skipped or failed for {fname}: {e}")
+        drive_file_id = await drive_storage.upload_file(
+            owner_id=session.user_id,
+            filename=fname,
+            content=c_bytes,
+            mime_type=mime_type,
+        )
 
         # Count chunks for this specific document
         doc_chunk_count = sum(1 for c in pipeline.chunker.chunk_documents([doc])) if hasattr(pipeline, "chunker") else 1
@@ -226,7 +235,7 @@ async def ingest_documents(
 )
 async def list_documents(
     provider_id: Optional[str] = Query(None, description="Optional provider identifier filter."),
-    session: UserSession = Depends(require_authentication),
+    session: UserSession = Depends(require_workspace_access),
     pipeline: RAGPipeline = Depends(get_rag_pipeline),
 ) -> DocumentListResponse:
     """Lists documents owned by the current user."""
@@ -285,7 +294,7 @@ async def list_documents(
 async def delete_document(
     doc_id: str = Path(..., description="Unique document ID to delete."),
     provider_id: Optional[str] = Query(None, description="Optional provider identifier filter."),
-    session: UserSession = Depends(require_authentication),
+    session: UserSession = Depends(require_workspace_access),
     pipeline: RAGPipeline = Depends(get_rag_pipeline),
 ) -> DocumentDeleteResponse:
     """Deletes a specific document owned by the user."""
@@ -329,7 +338,7 @@ async def delete_document(
 )
 async def clear_user_documents(
     provider_id: Optional[str] = Query(None, description="Optional provider identifier filter."),
-    session: UserSession = Depends(require_authentication),
+    session: UserSession = Depends(require_workspace_access),
     pipeline: RAGPipeline = Depends(get_rag_pipeline),
 ) -> UserClearResponse:
     """Purges all documents owned by the caller."""

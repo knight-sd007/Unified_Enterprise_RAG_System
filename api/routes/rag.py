@@ -5,7 +5,13 @@ Supports decoupled chat generation and embedding models.
 
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
-from api.dependencies import APIError, UserSession, get_rag_pipeline, require_admin, require_authentication
+from api.dependencies import (
+    APIError,
+    UserSession,
+    get_rag_pipeline,
+    require_admin,
+    require_workspace_access,
+)
 from api.schemas import (
     ClearIndexResponse,
     QueryRequest,
@@ -21,7 +27,6 @@ from utils.security import sanitize_error_message
 router = APIRouter(
     prefix="/rag",
     tags=["RAG Operations"],
-    dependencies=[Depends(require_authentication)],
 )
 
 
@@ -36,7 +41,7 @@ router = APIRouter(
 )
 async def query_rag(
     req: QueryRequest,
-    session: UserSession = Depends(require_authentication),
+    session: UserSession = Depends(require_workspace_access),
     pipeline: RAGPipeline = Depends(get_rag_pipeline),
 ) -> QueryResponse:
     """Executes semantic retrieval with owner scoping and grounded answer generation."""
@@ -143,7 +148,7 @@ async def query_rag(
 )
 async def get_rag_stats(
     provider_id: Optional[str] = Query(None, description="Optional provider identifier ('openai', 'gemini', 'nvidia_nim')."),
-    session: UserSession = Depends(require_authentication),
+    session: UserSession = Depends(require_workspace_access),
     pipeline: RAGPipeline = Depends(get_rag_pipeline),
 ) -> RAGStatsResponse:
     """Returns provider-scoped vector store telemetry for the current user."""

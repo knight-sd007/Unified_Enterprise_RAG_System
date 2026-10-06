@@ -112,12 +112,23 @@ async def clear_global_vectors(
         f"GLOBAL VECTOR PURGE initiated by admin '{admin.user_id}' (provider_id: {payload.provider_id})"
     )
 
+    # 1. Clear vector store across all configured collections FIRST
+    try:
+        pipeline.clear_index(provider_id=payload.provider_id)
+    except Exception as e:
+        from utils.security import sanitize_error_message
+        clean_err = sanitize_error_message(e)
+        logger.error(f"Global vector purge failed during vector index clearance: {clean_err}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Global vector purge failed: {clean_err}",
+        )
+
+    # 2. Only after all vector collections succeed, delete SQLite metadata
     repo = get_metadata_repo()
     deleted_docs = repo.delete_all_global()
     purged_doc_count = len(deleted_docs)
     purged_chunk_count = sum(d.get("chunk_count", 0) for d in deleted_docs)
-
-    pipeline.clear_index(provider_id=payload.provider_id)
 
     return AdminVectorClearResponse(
         status="success",

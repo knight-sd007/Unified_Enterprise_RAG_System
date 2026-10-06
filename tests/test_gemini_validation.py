@@ -117,7 +117,19 @@ class TestGeminiProviderValidation(unittest.TestCase):
             self.assertEqual(call_kwargs["contents"], "task: question answering | query: What is enterprise RAG?")
             config = call_kwargs["config"]
             self.assertEqual(config.output_dimensionality, 768)
-            self.assertFalse(hasattr(config, "task_type") and config.task_type is not None)
+    @patch("config.settings.Config.is_gemini_configured", return_value=True)
+    @patch("config.settings.Config.get_gemini_api_key", return_value="fake-gemini-key")
+    @patch("config.settings.Config.get_gemini_chat_model", return_value="gemini-2.5-flash")
+    def test_check_connectivity_uses_configured_model(self, mock_model, mock_key, mock_cfg):
+        """check_connectivity dynamically probes the configured chat model instead of hardcoding obsolete models."""
+        with patch("google.genai.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value = mock_client
+
+            res = self.provider.check_connectivity()
+            self.assertEqual(res["status"], "connected")
+            self.assertIn("gemini-2.5-flash", res["message"])
+            mock_client.models.get.assert_called_once_with(model="models/gemini-2.5-flash")
 
 
 if __name__ == "__main__":

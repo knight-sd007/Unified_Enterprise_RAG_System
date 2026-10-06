@@ -47,14 +47,16 @@ class GeminiProvider(BaseAIProvider):
             api_key = Config.get_gemini_api_key()
             from google import genai
             client = genai.Client(api_key=api_key)
-            # Lightweight model lookup
-            client.models.get(model="models/gemini-1.5-flash")
+            # Lightweight dynamic model lookup using configured chat model
+            configured_model = self.get_chat_model_name()
+            probe_model = configured_model if configured_model.startswith("models/") else f"models/{configured_model}"
+            client.models.get(model=probe_model)
             latency = round((time.perf_counter() - start) * 1000, 2)
             return {
                 "provider_id": self.provider_id,
                 "name": self.name,
                 "status": "connected",
-                "message": "Successfully connected to Google Gemini API.",
+                "message": f"Successfully connected to Google Gemini API (probed '{configured_model}').",
                 "latency_ms": latency,
             }
         except Exception as e:

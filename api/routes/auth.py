@@ -73,41 +73,34 @@ def _sanitize_username(username: str) -> str:
 @router.post(
     "/login",
     response_model=LoginResponse,
-    summary="Authenticate with access key",
-    description="Validates the application or admin access key, binds user identity, and issues an HTTP-only session cookie.",
+    summary="Authenticate with administrator break-glass key",
+    description="Validates the administrator access key for emergency break-glass console access. Normal users must authenticate using Google OAuth.",
 )
 async def login(req: LoginRequest, response: Response) -> LoginResponse:
-    """Authenticates access key and sets secure session cookie with user identity."""
-    app_key = Config.get_app_access_key()
+    """Authenticates administrator break-glass access key and sets secure session cookie."""
     admin_key = Config.get_admin_access_key()
 
-    if not app_key and not admin_key:
+    if not admin_key:
         raise APIError(
             status_code=500,
             code="AUTH_CONFIGURATION_ERROR",
-            message="Application access key is not configured.",
+            message="Administrator access key (ADMIN_ACCESS_KEY) is not configured.",
         )
 
-    # Validate access key and resolve role
-    is_admin = bool(admin_key and verify_access_key(req.access_key, admin_key))
-    is_app_user = bool(app_key and verify_access_key(req.access_key, app_key))
-
-    if not is_admin and not is_app_user:
+    # Validate administrator access key strictly
+    is_admin = bool(verify_access_key(req.access_key, admin_key))
+    if not is_admin:
         raise APIError(
             status_code=401,
             code="AUTHENTICATION_FAILED",
-            message="Invalid access key.",
+            message="Invalid administrator access key. Normal users must sign in with Google.",
         )
 
-    role = "admin" if is_admin else "user"
+    user_id = "admin"
+    role = "admin"
+    auth_type = "admin_key"
 
-    # Resolve user identity
-    if req.username and req.username.strip():
-        user_id = _sanitize_username(req.username)
-    else:
-        user_id = "admin" if is_admin else "default_user"
-
-    session_token = create_session_token(user_id=user_id, role=role)
+    session_token = create_session_token(user_id=user_id, role=role, auth_type=auth_type)
     is_secure = os.getenv("SESSION_COOKIE_SECURE", "false").lower() in ("true", "1", "yes")
 
     response.set_cookie(
@@ -124,7 +117,9 @@ async def login(req: LoginRequest, response: Response) -> LoginResponse:
         authenticated=True,
         user_id=user_id,
         role=role,
-        message="Authentication successful.",
+        auth_type=auth_type,
+        drive_authorized=False,
+        message="Administrator break-glass authentication successful.",
     )
 
 
@@ -309,7 +304,7 @@ async def google_oauth_callback(
             repo.save_oauth_tokens(user_id, "google", token_data)
 
             # 6. Issue session cookie
-            session_token = create_session_token(user_id=user_id, role=role)
+            session_token = create_session_token(user_id=user_id, role=role, auth_type="google")
             is_secure = os.getenv("SESSION_COOKIE_SECURE", "false").lower() in ("true", "1", "yes")
 
             response.set_cookie(
@@ -328,6 +323,8 @@ async def google_oauth_callback(
                 authenticated=True,
                 user_id=user_id,
                 role=role,
+                auth_type="google",
+                drive_authorized=True,
                 message=f"Google authentication successful for {email or user_id}.",
             )
 
@@ -347,18 +344,33 @@ async def google_oauth_callback(
 @router.get(
     "/status",
     response_model=AuthStatusResponse,
-    summary="Check session authentication status",
-    description="Returns whether the caller has an active authenticated session and user identity.",
+    summary="Check session authentication and Google Drive authorization status",
+    description="Returns whether the caller has an active authenticated session, user identity, and valid Drive authorization.",
 )
 async def auth_status(request: Request) -> AuthStatusResponse:
     """Checks session validity and identity from cookie or Authorization header."""
     session = get_current_session(request)
     if not session:
-        return AuthStatusResponse(authenticated=False, user_id=None, role=None)
+        return AuthStatusResponse(
+            authenticated=False,
+            user_id=None,
+            role=None,
+            auth_type=None,
+            drive_authorized=False,
+        )
+
+    drive_authorized = False
+    if session.user_id.startswith("google_"):
+        repo = get_metadata_repo()
+        tokens = repo.get_oauth_tokens(session.user_id, "google")
+        drive_authorized = bool(tokens and (tokens.get("access_token") or tokens.get("refresh_token")))
+
     return AuthStatusResponse(
         authenticated=True,
         user_id=session.user_id,
         role=session.role,
+        auth_type=session.auth_type,
+        drive_authorized=drive_authorized,
     )
 
 

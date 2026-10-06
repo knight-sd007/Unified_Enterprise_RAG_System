@@ -27,6 +27,8 @@ export const App: React.FC = () => {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<string>('default_user');
   const [currentRole, setCurrentRole] = useState<string>('user');
+  const [authType, setAuthType] = useState<string>('google');
+  const [driveAuthorized, setDriveAuthorized] = useState<boolean>(false);
 
   // System & Provider metadata
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -104,6 +106,8 @@ export const App: React.FC = () => {
         setIsAuthenticated(true);
         if (authStatus.user_id) setCurrentUser(authStatus.user_id);
         if (authStatus.role) setCurrentRole(authStatus.role);
+        setAuthType(authStatus.auth_type || 'google');
+        setDriveAuthorized(!!authStatus.drive_authorized);
 
         const providerRes = await apiClient.getProviders();
         const providerList = providerRes.providers || [];
@@ -118,11 +122,15 @@ export const App: React.FC = () => {
         setEmbeddingProviderId(defaultProv);
         setEmbeddingModel(activeProvObj?.embedding_model || '');
 
-        await Promise.all([
-          fetchStats(defaultProv),
-          fetchDocuments(defaultProv),
-          fetchProviderHealth(),
-        ]);
+        if (authStatus.auth_type !== 'admin_key') {
+          await Promise.all([
+            fetchStats(defaultProv),
+            fetchDocuments(defaultProv),
+            fetchProviderHealth(),
+          ]);
+        } else {
+          await fetchProviderHealth();
+        }
       } else {
         setIsAuthenticated(false);
       }
@@ -147,6 +155,8 @@ export const App: React.FC = () => {
           setIsAuthenticated(true);
           if (loginRes.user_id) setCurrentUser(loginRes.user_id);
           if (loginRes.role) setCurrentRole(loginRes.role);
+          setAuthType(loginRes.auth_type || 'google');
+          setDriveAuthorized(!!loginRes.drive_authorized);
           bootstrapSystem();
         })
         .catch((err) => {
@@ -178,13 +188,15 @@ export const App: React.FC = () => {
   };
 
   // Handle Login submission
-  const handleLogin = async (accessKey: string, username?: string): Promise<boolean> => {
+  const handleLogin = async (accessKey: string): Promise<boolean> => {
     setLoginError(null);
     try {
-      const loginRes = await apiClient.login(accessKey, username);
+      const loginRes = await apiClient.login(accessKey);
       setIsAuthenticated(true);
       if (loginRes.user_id) setCurrentUser(loginRes.user_id);
       if (loginRes.role) setCurrentRole(loginRes.role);
+      setAuthType(loginRes.auth_type || 'admin_key');
+      setDriveAuthorized(!!loginRes.drive_authorized);
 
       await bootstrapSystem();
       return true;
@@ -328,10 +340,31 @@ export const App: React.FC = () => {
         providerHealthList={providerHealthList}
         currentUser={currentUser}
         currentRole={currentRole}
+        authType={authType}
+        driveAuthorized={driveAuthorized}
       />
 
       {/* Main Operational Workspace */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {authType === 'admin_key' && (
+          <div className="mb-6 p-4 rounded-xl bg-amber-950/40 border border-amber-500/40 text-amber-200 text-xs flex items-center justify-between shadow-sm">
+            <div className="flex items-center gap-2.5">
+              <span className="font-bold uppercase tracking-wider text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                Break-Glass Mode
+              </span>
+              <span>
+                You are authenticated via <strong>ADMIN_ACCESS_KEY</strong>. Document workspace and RAG operations are disabled. Use the <strong>Admin Console</strong> above for diagnostics and vector purge.
+              </span>
+            </div>
+            <button
+              onClick={() => setIsAdminConsoleOpen(true)}
+              className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-200 font-semibold text-xs transition-colors shrink-0 ml-4"
+            >
+              Open Admin Console
+            </button>
+          </div>
+        )}
+
         {/* Real-time Telemetry Status HUD */}
         <TelemetryHUD
           stats={stats}

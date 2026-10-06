@@ -12,12 +12,16 @@ export interface AuthStatusResponse {
   authenticated: boolean;
   user_id?: string | null;
   role?: string | null;
+  auth_type?: string | null;
+  drive_authorized?: boolean;
 }
 
 export interface LoginResponse {
   authenticated: boolean;
   user_id?: string;
   role?: string;
+  auth_type?: string;
+  drive_authorized?: boolean;
   message: string;
 }
 

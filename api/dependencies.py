@@ -36,12 +36,18 @@ class UserSession:
     """Represents an authenticated user session."""
     user_id: str = "default_user"
     role: str = "user"
+    auth_type: str = "google"
     authenticated: bool = True
 
     @property
     def is_admin(self) -> bool:
         """Returns True if the session possesses administrative privileges."""
         return self.role == "admin"
+
+    @property
+    def is_google_user(self) -> bool:
+        """Returns True if the session originates from verified Google OAuth."""
+        return self.auth_type == "google" and self.user_id.startswith("google_")
 
 
 def _get_serializer() -> URLSafeTimedSerializer:
@@ -56,10 +62,17 @@ def _get_serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(secret_key=secret, salt=SESSION_SALT)
 
 
-def create_session_token(user_id: str = "default_user", role: str = "user") -> str:
-    """Generates a cryptographically signed, timestamped session token with identity."""
+def create_session_token(
+    user_id: str = "default_user", role: str = "user", auth_type: str = "google"
+) -> str:
+    """Generates a cryptographically signed, timestamped session token with identity and auth_type."""
     serializer = _get_serializer()
-    return serializer.dumps({"authenticated": True, "user_id": user_id, "role": role})
+    return serializer.dumps({
+        "authenticated": True,
+        "user_id": user_id,
+        "role": role,
+        "auth_type": auth_type,
+    })
 
 
 def verify_session_token(token: str) -> Optional[Dict[str, Any]]:
@@ -73,11 +86,12 @@ def verify_session_token(token: str) -> Optional[Dict[str, Any]]:
         serializer = _get_serializer()
         data = serializer.loads(token, max_age=SESSION_MAX_AGE_SECONDS)
         if isinstance(data, dict) and data.get("authenticated") is True:
-            # Backward compatibility for legacy session tokens that lacked user_id
             if "user_id" not in data:
                 data["user_id"] = "default_user"
             if "role" not in data:
                 data["role"] = "user"
+            if "auth_type" not in data:
+                data["auth_type"] = "admin_key" if data.get("role") == "admin" and not data.get("user_id", "").startswith("google_") else "google"
             return data
         return None
     except (BadSignature, SignatureExpired, APIError, Exception):
@@ -115,6 +129,7 @@ def get_current_session(request: Request) -> Optional[UserSession]:
     return UserSession(
         user_id=payload.get("user_id", "default_user"),
         role=payload.get("role", "user"),
+        auth_type=payload.get("auth_type", "google"),
         authenticated=True,
     )
 
@@ -146,6 +161,38 @@ def require_admin(request: Request) -> UserSession:
             code="FORBIDDEN",
             message="Administrative privileges required for this operation.",
         )
+    return session
+
+
+def require_workspace_access(request: Request) -> UserSession:
+    """
+    Enforces that normal workspace RAG and document operations require a Google-authenticated
+    user with active Google Drive authorization. Break-glass admin-key sessions are prohibited.
+    """
+    session = require_authentication(request)
+
+    # 1. Prohibit break-glass admin-key sessions from normal document workspace & RAG
+    if session.auth_type == "admin_key" or not session.user_id.startswith("google_"):
+        raise APIError(
+            status_code=403,
+            code="ADMIN_KEY_WORKSPACE_RESTRICTED",
+            message=(
+                "Administrator break-glass key session is restricted to administrative operations. "
+                "Document workspace and RAG operations require Google login with Google Drive authorization."
+            ),
+        )
+
+    # 2. Check that the user has authorized Google Drive
+    from rag.storage.metadata_db import get_metadata_repo
+    repo = get_metadata_repo()
+    tokens = repo.get_oauth_tokens(session.user_id, "google")
+    if not tokens or not (tokens.get("access_token") or tokens.get("refresh_token")):
+        raise APIError(
+            status_code=403,
+            code="DRIVE_AUTHORIZATION_REQUIRED",
+            message="Google Drive authorization is required to access the P06 workspace. Please sign in with Google and grant Google Drive permissions.",
+        )
+
     return session
 
 

@@ -188,14 +188,103 @@ class TestQdrantVectorStore(unittest.TestCase):
         self.assertIsNone(self.store.get_active_provider_id())
         self.assertIsNone(self.store.get_embedding_dimension())
 
-    def test_clear_store_no_provider_safe_return(self):
-        """When no provider is specified and none active, clear_store must not perform destructive delete."""
+    def test_clear_store_global_purges_all_provider_collections(self):
+        """When provider_id is None, clear_store executes global wipe across all configured provider collections."""
         self.store._active_provider_id = None
         self.store.clear_store(provider_id=None)
 
-        self.mock_client.delete.assert_not_called()
+        # Asserts client.delete was called for all 3 collections
+        self.assertEqual(self.mock_client.delete.call_count, 3)
+        deleted_collections = [call[1]["collection_name"] for call in self.mock_client.delete.call_args_list]
+        self.assertIn("p06_gemini_embedding_2_768", deleted_collections)
+        self.assertIn("p06_openai_text_embedding_3_small", deleted_collections)
+        self.assertIn("p06_nvidia_llama_nemotron_embed_1b_v2_2048", deleted_collections)
         self.assertIsNone(self.store.get_active_provider_id())
         self.assertIsNone(self.store.get_embedding_dimension())
+
+    def test_ensure_payload_indexes_creates_missing_doc_id_and_owner_id(self):
+        """Missing doc_id and owner_id indexes are created with KEYWORD schema."""
+        from qdrant_client import models
+        mock_info = MagicMock()
+        mock_info.payload_schema = {}
+        self.mock_client.get_collection.return_value = mock_info
+
+        self.store._ensure_payload_indexes(self.mock_client, "p06_gemini_embedding_2_768")
+
+        self.assertEqual(self.mock_client.create_payload_index.call_count, 2)
+        created_fields = [call[1]["field_name"] for call in self.mock_client.create_payload_index.call_args_list]
+        self.assertIn("doc_id", created_fields)
+        self.assertIn("owner_id", created_fields)
+        for call in self.mock_client.create_payload_index.call_args_list:
+            self.assertEqual(call[1]["field_schema"], models.PayloadSchemaType.KEYWORD)
+            self.assertTrue(call[1]["wait"])
+
+    def test_ensure_payload_indexes_skips_existing_indexes(self):
+        """Existing indexes in collection schema are tolerated and not re-created."""
+        mock_info = MagicMock()
+        mock_info.payload_schema = {"doc_id": MagicMock(), "owner_id": MagicMock()}
+        self.mock_client.get_collection.return_value = mock_info
+
+        self.store._ensure_payload_indexes(self.mock_client, "p06_gemini_embedding_2_768")
+
+        self.mock_client.create_payload_index.assert_not_called()
+
+    def test_ensure_payload_indexes_tolerates_already_exists_exception(self):
+        """When create_payload_index throws an 'already exists' exception, operation succeeds."""
+        mock_info = MagicMock()
+        mock_info.payload_schema = {}
+        self.mock_client.get_collection.return_value = mock_info
+        self.mock_client.create_payload_index.side_effect = Exception("Index for field `doc_id` already exists")
+
+        # Must not raise
+        self.store._ensure_payload_indexes(self.mock_client, "p06_gemini_embedding_2_768")
+
+    def test_ensure_payload_indexes_surfaces_permission_authentication_error(self):
+        """A genuine Qdrant permission or authentication error is NOT swallowed."""
+        mock_info = MagicMock()
+        mock_info.payload_schema = {}
+        self.mock_client.get_collection.return_value = mock_info
+        self.mock_client.create_payload_index.side_effect = RuntimeError("Forbidden: API key lacks index creation permission")
+
+        with self.assertRaises(RuntimeError) as ctx:
+            self.store._ensure_payload_indexes(self.mock_client, "p06_gemini_embedding_2_768")
+        self.assertIn("Payload Index Error", str(ctx.exception))
+        self.assertIn("lacks index creation permission", str(ctx.exception))
+
+    def test_ensure_payload_indexes_surfaces_network_error(self):
+        """A genuine network/connection error is NOT swallowed."""
+        mock_info = MagicMock()
+        mock_info.payload_schema = {}
+        self.mock_client.get_collection.return_value = mock_info
+        self.mock_client.create_payload_index.side_effect = ConnectionError("Connection refused to Qdrant cluster")
+
+        with self.assertRaises(RuntimeError) as ctx:
+            self.store._ensure_payload_indexes(self.mock_client, "p06_gemini_embedding_2_768")
+        self.assertIn("Connection refused", str(ctx.exception))
+
+    def test_delete_document_fails_when_indexing_cannot_be_established(self):
+        """Document deletion does not silently proceed when required indexing cannot be established."""
+        self.mock_client.create_payload_index.side_effect = RuntimeError("Qdrant cluster unavailable")
+        mock_info = MagicMock()
+        mock_info.payload_schema = {}
+        self.mock_client.get_collection.return_value = mock_info
+
+        with self.assertRaises(RuntimeError) as ctx:
+            self.store.delete_document("doc_xyz", provider_id="gemini")
+        self.assertIn("Qdrant cluster unavailable", str(ctx.exception))
+        self.mock_client.delete.assert_not_called()
+
+    def test_clear_user_documents_fails_when_indexing_cannot_be_established(self):
+        """User clear does not silently proceed when required indexing cannot be established."""
+        self.mock_client.create_payload_index.side_effect = RuntimeError("Qdrant authorization token invalid")
+        mock_info = MagicMock()
+        mock_info.payload_schema = {}
+        self.mock_client.get_collection.return_value = mock_info
+
+        with self.assertRaises(RuntimeError) as ctx:
+            self.store.clear_user_documents("google_alice", provider_id="gemini")
+        self.assertIn("Qdrant authorization token invalid", str(ctx.exception))
+        self.mock_client.delete.assert_not_called()
 
 
 if __name__ == "__main__":

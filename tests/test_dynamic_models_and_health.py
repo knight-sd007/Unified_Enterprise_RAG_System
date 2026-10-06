@@ -10,15 +10,14 @@ from api.main import app
 from rag.chunker import Chunk
 from rag.pipeline import RAGPipeline
 from rag.vector_store import InMemoryVectorStore
+from rag.storage.metadata_db import get_metadata_repo
 
 
 class TestDynamicModelsAndHealth(unittest.TestCase):
     """Test suite for decoupled model execution and provider connectivity probes."""
 
     def setUp(self):
-        self.key_patcher = patch("config.settings.Config.get_app_access_key", return_value="test-app-key-123")
         self.session_key_patcher = patch("config.settings.Config.get_session_signing_key", return_value="test-session-signing-key-789")
-        self.key_patcher.start()
         self.session_key_patcher.start()
 
         self.client = TestClient(app)
@@ -26,13 +25,21 @@ class TestDynamicModelsAndHealth(unittest.TestCase):
         self.pipeline = RAGPipeline(vector_store=self.store)
         set_rag_pipeline(self.pipeline)
 
-        self.auth_token = create_session_token(user_id="alice", role="user")
+        # Seed OAuth tokens in SQLite for Google Drive access
+        get_metadata_repo().save_oauth_tokens(
+            user_id="google_alice",
+            provider="google",
+            token_data={"access_token": "ya29.mock_token", "refresh_token": "mock_refresh"},
+        )
+
+        self.auth_token = create_session_token(user_id="google_alice", role="user", auth_type="google")
         self.auth_headers = {"Authorization": f"Bearer {self.auth_token}"}
 
     def tearDown(self):
+        get_metadata_repo().delete_all_global()
+        get_metadata_repo().delete_oauth_tokens("google_alice", "google")
         set_rag_pipeline(None)
         self.session_key_patcher.stop()
-        self.key_patcher.stop()
 
     def test_providers_health_endpoint(self):
         """GET /health/providers returns accurate status for each provider."""
@@ -57,9 +64,9 @@ class TestDynamicModelsAndHealth(unittest.TestCase):
         """RAG query can use Gemini for embedding search and OpenAI for text generation."""
         chunk = Chunk(
             content="Enterprise compliance guidelines.",
-            metadata={"filename": "doc.pdf", "chunk_id": "c1", "doc_id": "d1"},
+            metadata={"filename": "doc.pdf", "chunk_id": "c1", "doc_id": "d1", "owner_id": "google_alice"},
         )
-        self.store.add_chunks([chunk], [[0.1] * 768], "gemini", owner_id="alice")
+        self.store.add_chunks([chunk], [[0.1] * 768], "gemini", owner_id="google_alice")
 
         res = self.client.post(
             "/api/v1/rag/query",

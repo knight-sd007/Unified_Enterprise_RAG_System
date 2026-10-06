@@ -312,8 +312,59 @@ class QdrantVectorStore:
             raise ValueError(f"Unknown or unsupported provider '{provider_id}' for Qdrant storage.")
         return spec
 
+    def _ensure_payload_indexes(self, client: Any, collection_name: str):
+        """
+        Ensures keyword payload schema indexes exist on doc_id and owner_id fields.
+        Inspects existing collection schema first where supported, tolerates strictly
+        already-existing indexes, and surfaces genuine infrastructure failures.
+        """
+        from qdrant_client import models
+
+        existing_indexes = set()
+        if hasattr(client, "get_collection") and callable(getattr(client, "get_collection")):
+            try:
+                info = client.get_collection(collection_name=collection_name)
+                if hasattr(info, "payload_schema") and isinstance(info.payload_schema, dict):
+                    existing_indexes = set(info.payload_schema.keys())
+            except Exception as schema_err:
+                clean_err = sanitize_error_message(schema_err)
+                err_msg = str(schema_err).lower()
+                if any(k in err_msg for k in ["auth", "permission", "connect", "timeout", "unauthorized", "forbidden"]):
+                    logger.error(f"Infrastructure error inspecting payload schema on '{collection_name}': {clean_err}")
+                    raise RuntimeError(f"Qdrant Payload Schema Error on '{collection_name}': {clean_err}")
+                logger.debug(f"Could not inspect existing payload schema on '{collection_name}': {clean_err}")
+
+        for field in ["doc_id", "owner_id"]:
+            if field in existing_indexes:
+                continue
+
+            try:
+                client.create_payload_index(
+                    collection_name=collection_name,
+                    field_name=field,
+                    field_schema=models.PayloadSchemaType.KEYWORD,
+                    wait=True
+                )
+            except Exception as index_err:
+                err_msg = str(index_err).lower()
+                is_already_exists = (
+                    "already exists" in err_msg
+                    or "already indexed" in err_msg
+                    or "already configured" in err_msg
+                )
+                if is_already_exists:
+                    logger.debug(f"Payload index '{field}' already exists on '{collection_name}'.")
+                else:
+                    clean_err = sanitize_error_message(index_err)
+                    logger.error(
+                        f"Failed to ensure required payload index '{field}' on collection '{collection_name}': {clean_err}"
+                    )
+                    raise RuntimeError(
+                        f"Qdrant Payload Index Error for field '{field}' on '{collection_name}': {clean_err}"
+                    )
+
     def _verify_collection_exists(self, client: Any, collection_name: str, provider_id: str):
-        """Verifies that collection exists on Qdrant Cloud. Does NOT auto-create collections."""
+        """Verifies that collection exists on Qdrant Cloud and ensures payload indexes."""
         try:
             exists = client.collection_exists(collection_name=collection_name)
         except Exception as e:
@@ -326,6 +377,7 @@ class QdrantVectorStore:
                 f"Qdrant collection '{collection_name}' for provider '{provider_id}' does not exist on cluster. "
                 f"Please provision the collection in Qdrant Cloud before indexing documents."
             )
+        self._ensure_payload_indexes(client, collection_name)
 
     def add_chunks(
         self,
@@ -590,6 +642,8 @@ class QdrantVectorStore:
         if not client.collection_exists(collection_name=spec.collection_name):
             return 0
 
+        self._ensure_payload_indexes(client, spec.collection_name)
+
         from qdrant_client import models
 
         filter_conditions = [
@@ -631,6 +685,8 @@ class QdrantVectorStore:
         if not client.collection_exists(collection_name=spec.collection_name):
             return 0, 0
 
+        self._ensure_payload_indexes(client, spec.collection_name)
+
         docs_list = self.list_documents(owner_id=owner_id, provider_id=target_provider)
         doc_count = len(docs_list)
 
@@ -656,43 +712,39 @@ class QdrantVectorStore:
             raise RuntimeError(f"Qdrant User Clear Error: {clean_err}")
 
     def clear_store(self, provider_id: Optional[str] = None):
-        """Administrative wipe: Clears all indexed vector points from provider collection on Qdrant Cloud."""
-        target_provider = provider_id or self._active_provider_id
-        if not target_provider:
-            self._active_provider_id = None
-            self._embedding_dimension = None
-            logger.info("Cleared Qdrant vector store session metadata (no provider resolved).")
-            return
-
-        spec = self._validate_and_get_spec(target_provider)
+        """Administrative wipe: Clears all indexed vector points from all (or specified) provider collection(s) on Qdrant Cloud."""
         client = self._get_client()
+        from qdrant_client import models
 
-        if not client.collection_exists(collection_name=spec.collection_name):
-            self._active_provider_id = None
-            self._embedding_dimension = None
-            logger.warning(
-                f"Collection '{spec.collection_name}' does not exist on Qdrant cluster. Skipped point deletion."
-            )
-            return
+        if provider_id:
+            specs = [self._validate_and_get_spec(provider_id)]
+        else:
+            specs = list(Config.get_all_provider_specs().values())
 
-        try:
-            from qdrant_client import models
-            client.delete(
-                collection_name=spec.collection_name,
-                points_selector=models.FilterSelector(
-                    filter=models.Filter()
-                ),
-                wait=True,
-            )
-            self._active_provider_id = None
-            self._embedding_dimension = None
-            logger.info(
-                f"Admin cleared all points from Qdrant collection '{spec.collection_name}' for provider '{target_provider}'."
-            )
-        except Exception as e:
-            clean_err = sanitize_error_message(e)
-            logger.error(f"Qdrant clear error on collection '{spec.collection_name}': {clean_err}")
-            raise RuntimeError(f"Qdrant Clear Error: {clean_err}")
+        cleared_collections = []
+        for spec in specs:
+            try:
+                if not client.collection_exists(collection_name=spec.collection_name):
+                    continue
+                client.delete(
+                    collection_name=spec.collection_name,
+                    points_selector=models.FilterSelector(
+                        filter=models.Filter()
+                    ),
+                    wait=True,
+                )
+                cleared_collections.append(spec.collection_name)
+                logger.info(
+                    f"Admin cleared all points from Qdrant collection '{spec.collection_name}' for provider '{spec.provider_id}'."
+                )
+            except Exception as e:
+                clean_err = sanitize_error_message(e)
+                logger.error(f"Qdrant clear error on collection '{spec.collection_name}': {clean_err}")
+                raise RuntimeError(f"Qdrant Clear Error: {clean_err}")
+
+        self._active_provider_id = None
+        self._embedding_dimension = None
+        logger.info(f"Global admin vector wipe completed. Cleared collections: {cleared_collections}")
 
     def get_embedding_dimension(self) -> Optional[int]:
         """Returns active embedding dimension."""
