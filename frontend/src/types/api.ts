@@ -14,6 +14,9 @@ export interface AuthStatusResponse {
   role?: string | null;
   auth_type?: string | null;
   drive_authorized?: boolean;
+  name?: string | null;
+  email?: string | null;
+  picture?: string | null;
 }
 
 export interface LoginResponse {
@@ -23,6 +26,9 @@ export interface LoginResponse {
   auth_type?: string;
   drive_authorized?: boolean;
   message: string;
+  name?: string | null;
+  email?: string | null;
+  picture?: string | null;
 }
 
 export interface LogoutResponse {

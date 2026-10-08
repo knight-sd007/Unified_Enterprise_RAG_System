@@ -30,8 +30,8 @@ The platform unifies vector embeddings, semantic retrieval, prompt trust-boundar
          ┌─────────────────────────────┼─────────────────────────────┬─────────────────────────────┐
          ▼                             ▼                             ▼                             ▼
    /api/v1/auth/*              /api/v1/documents/*              /api/v1/rag/*                /api/v1/admin/*
- (Access Key Gate,             (Upload, Ingestion,          (Retrieval & Decoupled       (Privileged Overview,
-  OAuth & Drive Auth)           SQLite & Drive Sync)          QA Execution Pipeline)      Diagnostics & Purge)
+ (Google OAuth & Break-Glass    (Upload, Ingestion,          (Retrieval & Decoupled       (Privileged Overview,
+  Console Gate, Drive Auth)    SQLite & Drive Sync)          QA Execution Pipeline)      Diagnostics & Purge)
          │                             │                             │                             │
          ▼                             ▼                             ▼                             ▼
    Google OAuth                  DocumentLoader              SemanticRetriever            Metadata Repository
@@ -50,7 +50,7 @@ The platform unifies vector embeddings, semantic retrieval, prompt trust-boundar
 
 The FastAPI backend operates as a single-origin application server:
 1. **API Endpoints**: Routed under `/api/v1/*`.
-2. **Interactive Documentation**: Served under `/docs` (Swagger UI), `/redoc` (ReDoc), and `/openapi.json` (OpenAPI 3.1 Specification).
+2. **Interactive Documentation**: Served under `/docs` (Swagger UI), `/redoc` (ReDoc), and `/openapi.json` (OpenAPI 3.1 Specification), protected by session authentication for authenticated users and administrators.
 3. **Frontend Static Assets**: Compiled React assets located in `frontend/dist/` are served directly by FastAPI. Static JavaScript and CSS bundles are mounted under `/assets`, and client-side routes fallback to `frontend/dist/index.html` without intercepting `/api/*`, `/docs`, `/redoc`, or `/openapi.json`.
 
 ---
@@ -60,10 +60,13 @@ The FastAPI backend operates as a single-origin application server:
 - **Multi-User Document & Vector Isolation**: Complete tenant/user isolation across ingestion, retrieval, listing, and deletion. Each document and vector point is bound to a verified server-side `user_id`. Queries strictly search within the authenticated user's vector space.
 - **Durable SQLite Metadata Repository**: Stores document records, chunk distributions, file sizes, character counts, and encrypted credentials in `data/p06_metadata.db`.
 - **Google OAuth / OpenID Connect & Drive Integration**:
-  - Authenticates users with Google OAuth using verified `google_<sub_id>` identifiers.
-  - Server-side admin email/sub allowlist (`GOOGLE_ADMIN_EMAILS`) for automated privilege escalation.
-  - Optional user-consented source file backup to personal Google Drive with `https://www.googleapis.com/auth/drive.file` scope.
-  - Fernet-encrypted OAuth token storage at rest.
+  - Google OAuth is the primary application login mechanism.
+  - The Google `sub` claim serves as the immutable internal user identity key (`google_<sub_id>`).
+  - Google profile `name` is used as the user-facing display name.
+  - Google email is used for user identification and automated admin privilege escalation via `GOOGLE_ADMIN_EMAILS` (and `GOOGLE_ADMIN_SUBS`).
+  - Google Drive authorization (`https://www.googleapis.com/auth/drive.file` scope) is required for normal RAG/workspace/upload usage.
+  - Per-user personal Drive storage is used for original uploaded documents.
+  - Fernet-encrypted OAuth token storage at rest in SQLite.
 - **Decoupled & Dynamic Model Execution**:
   - Independent selection of text-generation model (`chat_provider_id` + `chat_model`) and embedding model (`embedding_provider_id` + `embedding_model`).
   - Allows semantic vector retrieval against Gemini/NVIDIA vector spaces while synthesizing final grounded responses via OpenAI GPT-4o.
@@ -79,7 +82,7 @@ The FastAPI backend operates as a single-origin application server:
 - **Deterministic Duplicate Protection**: Generates deterministic UUIDv5 chunk identifiers derived from owner, provider, document ID, and content metadata, enabling idempotent re-indexing.
 - **Prompt Trust Boundary**: Enforces prompt isolation where all retrieved context snippets are encapsulated as untrusted passive reference data to prevent prompt injection.
 - **Citation Back-References**: Responses return structured source citations containing chunk IDs, file origins, content snippets, and Cosine relevance scores.
-- **Session Authentication Gate**: Application access key verification using constant-time hashing (`hmac.compare_digest`) and dedicated cryptographic `SESSION_SIGNING_KEY` issuing a signed `p06_session` HttpOnly cookie or accepting Bearer tokens.
+- **Session Authentication Gate**: Authenticated browser session backed by cryptographic `SESSION_SIGNING_KEY` issuing signed `p06_session` HttpOnly cookie or accepting Bearer tokens. Google OAuth is the standard login method; `ADMIN_ACCESS_KEY` is reserved strictly as a break-glass administrative console mechanism and does not grant normal document workspace or RAG access.
 
 ---
 
@@ -93,20 +96,34 @@ The FastAPI backend operates as a single-origin application server:
 
 ---
 
-## 📖 API Documentation & Endpoints
+## 📖 Authenticated API Documentation & Endpoints
 
-Interactive documentation is available at runtime:
-- **Swagger UI**: [`/docs`](file:///docs) (or versioned alias `/api/v1/docs`)
-- **ReDoc UI**: [`/redoc`](file:///redoc) (or versioned alias `/api/v1/redoc`)
-- **OpenAPI Schema**: [`/openapi.json`](file:///openapi.json) (or versioned alias `/api/v1/openapi.json`)
+FastAPI provides interactive OpenAPI documentation at runtime. All documentation endpoints require an active authenticated application session:
+
+- **Swagger UI**: `https://rag.vaikuntrix.in/docs` (or versioned alias `/api/v1/docs`)
+- **ReDoc UI**: `https://rag.vaikuntrix.in/redoc` (or versioned alias `/api/v1/redoc`)
+- **OpenAPI Schema**: `https://rag.vaikuntrix.in/openapi.json` (or versioned alias `/api/v1/openapi.json`)
+
+Both normal authenticated Google users and administrators can access the API documentation. Endpoint-level authorization remains strictly enforced: viewing documentation does not allow normal users to invoke admin-only endpoints. Unauthenticated requests to documentation endpoints are rejected with `401 Unauthorized`.
+
+### API Documentation Usage
+
+1. Sign in through Google OAuth.
+2. Ensure required Google Drive authorization is active for normal RAG and workspace usage.
+3. Open `https://rag.vaikuntrix.in/docs` (or `/redoc`) in your browser.
+4. Swagger UI loads using the existing authenticated browser session (`p06_session` HttpOnly cookie) with credentials enabled.
+5. Interactive API requests made via Swagger UI remain subject to backend authorization rules.
 
 ### Endpoint Reference
 
 | Method | Path | Auth Required | Role | Description |
 | :--- | :--- | :--- | :--- | :--- |
+| `GET` | `/docs` / `/api/v1/docs` | **Yes** | User / Admin | Interactive Swagger UI documentation (requires authenticated session). |
+| `GET` | `/redoc` / `/api/v1/redoc` | **Yes** | User / Admin | ReDoc documentation interface (requires authenticated session). |
+| `GET` | `/openapi.json` / `/api/v1/openapi.json` | **Yes** | User / Admin | OpenAPI 3.1 specification schema (requires authenticated session). |
 | `GET` | `/health` / `/api/v1/health` | No | Public | Service liveness and operational health probe. |
 | `GET` | `/health/providers` | No | Public | Real-time connectivity and credential health for all AI providers. |
-| `POST` | `/api/v1/auth/login` | No | Public | Authenticates `access_key`, sets `username`, and issues `p06_session` cookie. |
+| `POST` | `/api/v1/auth/login` | No | Public | Authenticates `ADMIN_ACCESS_KEY` for break-glass emergency console access (workspace RAG restricted). |
 | `GET` | `/api/v1/auth/google/config`| No | Public | Returns Google OAuth client ID and redirect URI configuration. |
 | `POST` | `/api/v1/auth/google/callback`| No | Public | Exchanges Google OAuth authorization code and provisions session. |
 | `GET` | `/api/v1/auth/status` | No | Public | Returns session authentication status and authenticated identity. |
@@ -228,7 +245,7 @@ curl -X POST "http://127.0.0.1:8000/api/v1/admin/vectors/clear" \
 
 ## 🔒 Security & Hardening
 
-1. **Dedicated Session Token Signing**: `SESSION_SIGNING_KEY` is completely isolated from `APP_ACCESS_KEY` and `ADMIN_ACCESS_KEY`. Even if regular users possess the app key, they cannot forge admin tokens or modify signed claims.
+1. **Dedicated Session Token Signing**: `SESSION_SIGNING_KEY` is completely isolated from `ADMIN_ACCESS_KEY`. Normal users authenticate through Google OAuth; session tokens are cryptographically signed with tamper-proof claims.
 2. **Encrypted Token Vault**: Google OAuth refresh and access tokens are encrypted at rest with Fernet symmetric encryption derived from server secrets.
 3. **Prompt Trust Isolation**: Context chunks are strictly treated as untrusted reference data in the prompt template.
 4. **Distroless & Nonroot Execution**: Runs under Debian Distroless with nonroot UID 10001.
@@ -243,7 +260,7 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Run Test Suite (162 unit & integration tests)
+# 2. Run Test Suite (209 unit & integration tests)
 pytest -v
 
 # 3. Build Frontend

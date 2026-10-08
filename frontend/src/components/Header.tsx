@@ -11,6 +11,7 @@ interface HeaderProps {
   onLogout: () => void;
   providerHealthList: ProviderHealthItem[];
   currentUser?: string;
+  displayName?: string;
   currentRole?: string;
   authType?: string;
   driveAuthorized?: boolean;
@@ -25,6 +26,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   providerHealthList,
   currentUser = 'default_user',
+  displayName,
   currentRole = 'user',
   authType = 'google',
   driveAuthorized = false,
@@ -36,7 +38,10 @@ export const Header: React.FC<HeaderProps> = ({
 
   const isConnected = activeHealth ? activeHealth.status === 'connected' : activeProvider?.configured;
   const isNotConfigured = activeHealth ? activeHealth.status === 'not_configured' : !activeProvider?.configured;
-  const isGoogleUser = currentUser.startsWith('google_');
+  const isGoogleUser = authType === 'google' || currentUser.startsWith('google_');
+  const visibleName = displayName && displayName.trim()
+    ? displayName.trim()
+    : (isGoogleUser ? 'Google User' : currentUser);
 
   return (
     <header className="bg-surface-1 border-b border-border-card sticky top-0 z-30 shadow-sm">
@@ -87,14 +92,14 @@ export const Header: React.FC<HeaderProps> = ({
                 ? 'bg-amber-950/40 border-amber-500/40 text-amber-300'
                 : 'bg-surface-2 border-border-card text-slate-300'
             }`}
-            title={`Logged in as ${currentUser} (${currentRole})${isGoogleUser ? ' via Google OAuth' : ''}`}
+            title={`Logged in as ${visibleName} (${currentRole})${isGoogleUser ? ' via Google OAuth' : ''}`}
           >
             {isAdmin ? (
               <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
             ) : (
               <UserCheck className="w-3.5 h-3.5 text-sky-400" />
             )}
-            <span className="max-w-[120px] truncate">{currentUser}</span>
+            <span className="max-w-[140px] truncate">{visibleName}</span>
             {isAdmin && <span className="text-[10px] uppercase font-bold text-amber-400">[Admin]</span>}
           </div>
 

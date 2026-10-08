@@ -38,6 +38,9 @@ class UserSession:
     role: str = "user"
     auth_type: str = "google"
     authenticated: bool = True
+    name: Optional[str] = None
+    email: Optional[str] = None
+    picture: Optional[str] = None
 
     @property
     def is_admin(self) -> bool:
@@ -63,16 +66,28 @@ def _get_serializer() -> URLSafeTimedSerializer:
 
 
 def create_session_token(
-    user_id: str = "default_user", role: str = "user", auth_type: str = "google"
+    user_id: str = "default_user",
+    role: str = "user",
+    auth_type: str = "google",
+    name: Optional[str] = None,
+    email: Optional[str] = None,
+    picture: Optional[str] = None,
 ) -> str:
     """Generates a cryptographically signed, timestamped session token with identity and auth_type."""
     serializer = _get_serializer()
-    return serializer.dumps({
+    payload = {
         "authenticated": True,
         "user_id": user_id,
         "role": role,
         "auth_type": auth_type,
-    })
+    }
+    if name:
+        payload["name"] = name
+    if email:
+        payload["email"] = email
+    if picture:
+        payload["picture"] = picture
+    return serializer.dumps(payload)
 
 
 def verify_session_token(token: str) -> Optional[Dict[str, Any]]:
@@ -131,6 +146,9 @@ def get_current_session(request: Request) -> Optional[UserSession]:
         role=payload.get("role", "user"),
         auth_type=payload.get("auth_type", "google"),
         authenticated=True,
+        name=payload.get("name"),
+        email=payload.get("email"),
+        picture=payload.get("picture"),
     )
 
 

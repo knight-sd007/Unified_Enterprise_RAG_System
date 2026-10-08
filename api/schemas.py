@@ -40,6 +40,9 @@ class LoginResponse(BaseModel):
     auth_type: Optional[str] = Field("google", description="Authentication mechanism ('google' or 'admin_key').")
     drive_authorized: bool = Field(False, description="Whether Google Drive authorization is active.")
     message: str = Field("Authentication successful.", description="Status message.")
+    name: Optional[str] = Field(None, description="User display name from Google OAuth profile.")
+    email: Optional[str] = Field(None, description="User email from Google OAuth profile.")
+    picture: Optional[str] = Field(None, description="User avatar image URL from Google OAuth profile.")
 
 
 class AuthStatusResponse(BaseModel):
@@ -49,6 +52,9 @@ class AuthStatusResponse(BaseModel):
     role: Optional[str] = Field(None, description="Session role ('user' or 'admin').")
     auth_type: Optional[str] = Field(None, description="Authentication mechanism ('google' or 'admin_key').")
     drive_authorized: bool = Field(False, description="Whether Google Drive authorization is active.")
+    name: Optional[str] = Field(None, description="User display name from Google OAuth profile.")
+    email: Optional[str] = Field(None, description="User email from Google OAuth profile.")
+    picture: Optional[str] = Field(None, description="User avatar image URL from Google OAuth profile.")
 
 
 class LogoutResponse(BaseModel):

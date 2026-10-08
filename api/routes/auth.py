@@ -101,7 +101,7 @@ async def login(req: LoginRequest, response: Response) -> LoginResponse:
     role = "admin"
     auth_type = "admin_key"
 
-    session_token = create_session_token(user_id=user_id, role=role, auth_type=auth_type)
+    session_token = create_session_token(user_id=user_id, role=role, auth_type=auth_type, name="admin")
     is_secure = os.getenv("SESSION_COOKIE_SECURE", "false").lower() in ("true", "1", "yes")
 
     response.set_cookie(
@@ -120,6 +120,7 @@ async def login(req: LoginRequest, response: Response) -> LoginResponse:
         role=role,
         auth_type=auth_type,
         drive_authorized=False,
+        name="admin",
         message="Administrator break-glass authentication successful.",
     )
 
@@ -279,6 +280,9 @@ async def _process_google_oauth_exchange(
             sub = userinfo.get("sub")
             email = userinfo.get("email", "").lower()
             email_verified = userinfo.get("email_verified") is True
+            raw_name = (userinfo.get("name") or "").strip()
+            display_name = raw_name if raw_name else "Google User"
+            picture = userinfo.get("picture") or None
 
             if not sub:
                 raise APIError(
@@ -304,7 +308,14 @@ async def _process_google_oauth_exchange(
             repo.save_oauth_tokens(user_id, "google", token_data)
 
             # 6. Issue session cookie
-            session_token = create_session_token(user_id=user_id, role=role, auth_type="google")
+            session_token = create_session_token(
+                user_id=user_id,
+                role=role,
+                auth_type="google",
+                name=display_name,
+                email=email,
+                picture=picture,
+            )
             is_secure = os.getenv("SESSION_COOKIE_SECURE", "false").lower() in ("true", "1", "yes")
 
             response.set_cookie(
@@ -317,7 +328,7 @@ async def _process_google_oauth_exchange(
                 path="/",
             )
 
-            logger.info(f"Google OAuth login success for user '{user_id}' (email: '{email}', email_verified: {email_verified}, role: '{role}')")
+            logger.info(f"Google OAuth login success for user '{user_id}' (display_name: '{display_name}', email: '{email}', email_verified: {email_verified}, role: '{role}')")
 
             return LoginResponse(
                 authenticated=True,
@@ -325,7 +336,10 @@ async def _process_google_oauth_exchange(
                 role=role,
                 auth_type="google",
                 drive_authorized=True,
-                message=f"Google authentication successful for {email or user_id}.",
+                name=display_name,
+                email=email,
+                picture=picture,
+                message=f"Google authentication successful for {display_name or email or user_id}.",
             )
 
     except APIError:
@@ -423,12 +437,19 @@ async def auth_status(request: Request) -> AuthStatusResponse:
         tokens = repo.get_oauth_tokens(session.user_id, "google")
         drive_authorized = bool(tokens and (tokens.get("access_token") or tokens.get("refresh_token")))
 
+    display_name = session.name
+    if not display_name and session.is_google_user:
+        display_name = "Google User"
+
     return AuthStatusResponse(
         authenticated=True,
         user_id=session.user_id,
         role=session.role,
         auth_type=session.auth_type,
         drive_authorized=drive_authorized,
+        name=display_name,
+        email=session.email,
+        picture=session.picture,
     )
 
 

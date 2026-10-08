@@ -26,6 +26,7 @@ export const App: React.FC = () => {
   const [isAuthChecking, setIsAuthChecking] = useState<boolean>(true);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<string>('default_user');
+  const [currentDisplayName, setCurrentDisplayName] = useState<string | null>(null);
   const [currentRole, setCurrentRole] = useState<string>('user');
   const [authType, setAuthType] = useState<string>('google');
   const [driveAuthorized, setDriveAuthorized] = useState<boolean>(false);
@@ -105,6 +106,7 @@ export const App: React.FC = () => {
       if (authStatus?.authenticated) {
         setIsAuthenticated(true);
         if (authStatus.user_id) setCurrentUser(authStatus.user_id);
+        if (authStatus.name) setCurrentDisplayName(authStatus.name);
         if (authStatus.role) setCurrentRole(authStatus.role);
         setAuthType(authStatus.auth_type || 'google');
         setDriveAuthorized(!!authStatus.drive_authorized);
@@ -154,6 +156,7 @@ export const App: React.FC = () => {
         .then((loginRes) => {
           setIsAuthenticated(true);
           if (loginRes.user_id) setCurrentUser(loginRes.user_id);
+          if (loginRes.name) setCurrentDisplayName(loginRes.name);
           if (loginRes.role) setCurrentRole(loginRes.role);
           setAuthType(loginRes.auth_type || 'google');
           setDriveAuthorized(!!loginRes.drive_authorized);
@@ -194,6 +197,7 @@ export const App: React.FC = () => {
       const loginRes = await apiClient.login(accessKey);
       setIsAuthenticated(true);
       if (loginRes.user_id) setCurrentUser(loginRes.user_id);
+      if (loginRes.name) setCurrentDisplayName(loginRes.name);
       if (loginRes.role) setCurrentRole(loginRes.role);
       setAuthType(loginRes.auth_type || 'admin_key');
       setDriveAuthorized(!!loginRes.drive_authorized);
@@ -215,6 +219,7 @@ export const App: React.FC = () => {
     } finally {
       setIsAuthenticated(false);
       setCurrentUser('default_user');
+      setCurrentDisplayName(null);
       setCurrentRole('user');
       setDocuments([]);
       setStats(null);
@@ -339,6 +344,7 @@ export const App: React.FC = () => {
         onLogout={handleLogout}
         providerHealthList={providerHealthList}
         currentUser={currentUser}
+        displayName={currentDisplayName || undefined}
         currentRole={currentRole}
         authType={authType}
         driveAuthorized={driveAuthorized}

@@ -256,6 +256,7 @@ def _generate_custom_openapi():
     "/openapi.json",
     include_in_schema=False,
     summary="OpenAPI Schema",
+    dependencies=[Depends(require_authentication)],
 )
 async def get_openapi_schema():
     """Returns OpenAPI schema."""
@@ -266,12 +267,14 @@ async def get_openapi_schema():
     "/docs",
     include_in_schema=False,
     summary="Swagger UI",
+    dependencies=[Depends(require_authentication)],
 )
 async def get_swagger_ui():
     """Renders interactive Swagger UI documentation."""
     return get_swagger_ui_html(
         openapi_url="/openapi.json",
         title=f"{app.title} — API Documentation",
+        swagger_ui_parameters={"withCredentials": True},
     )
 
 
@@ -279,6 +282,7 @@ async def get_swagger_ui():
     "/redoc",
     include_in_schema=False,
     summary="ReDoc Documentation",
+    dependencies=[Depends(require_authentication)],
 )
 async def get_redoc():
     """Renders ReDoc API documentation."""
@@ -292,6 +296,7 @@ async def get_redoc():
     "/api/v1/openapi.json",
     include_in_schema=False,
     summary="OpenAPI Schema (versioned alias)",
+    dependencies=[Depends(require_authentication)],
 )
 async def get_openapi_schema_v1():
     """Versioned alias for OpenAPI schema."""
@@ -302,12 +307,14 @@ async def get_openapi_schema_v1():
     "/api/v1/docs",
     include_in_schema=False,
     summary="Swagger UI (versioned alias)",
+    dependencies=[Depends(require_authentication)],
 )
 async def get_swagger_ui_v1():
     """Versioned alias for Swagger UI documentation."""
     return get_swagger_ui_html(
         openapi_url="/api/v1/openapi.json",
         title=f"{app.title} — API Documentation",
+        swagger_ui_parameters={"withCredentials": True},
     )
 
 
@@ -315,6 +322,7 @@ async def get_swagger_ui_v1():
     "/api/v1/redoc",
     include_in_schema=False,
     summary="ReDoc Documentation (versioned alias)",
+    dependencies=[Depends(require_authentication)],
 )
 async def get_redoc_v1():
     """Versioned alias for ReDoc documentation."""

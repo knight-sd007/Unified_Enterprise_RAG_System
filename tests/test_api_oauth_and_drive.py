@@ -560,6 +560,85 @@ class TestGoogleOAuthAndDrive(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res2.status_code, 400)
         self.assertEqual(res2.json()["error"]["code"], "INVALID_OAUTH_STATE")
 
+    @patch("httpx.AsyncClient.post")
+    @patch("httpx.AsyncClient.get")
+    def test_google_oauth_display_name_preserved_with_immutable_sub(self, mock_get, mock_post):
+        """Google user with valid profile name receives display name while sub remains immutable internal ID."""
+        url_res = self.client.get("/api/v1/auth/google/url")
+        self.assertEqual(url_res.status_code, 200)
+        state = url_res.json()["state"]
+
+        mock_post.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"access_token": "mock_at", "refresh_token": "mock_rt"},
+        )
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {
+                "sub": "101239956578379584549",
+                "name": "Soumojit Das",
+                "email": "soumojit@enterprise.com",
+                "email_verified": True,
+                "picture": "https://lh3.googleusercontent.com/photo.jpg",
+            },
+        )
+
+        res = self.client.get(
+            f"/api/v1/auth/google/callback?code=valid_code&state={state}",
+            follow_redirects=False,
+        )
+        self.assertEqual(res.status_code, 303)
+        self.assertEqual(res.headers.get("location"), "/")
+
+        # Status check confirms sub remains immutable internal ID and display name is Google name
+        status_res = self.client.get("/api/v1/auth/status")
+        self.assertEqual(status_res.status_code, 200)
+        data = status_res.json()
+        self.assertTrue(data["authenticated"])
+        self.assertEqual(data["user_id"], "google_101239956578379584549")
+        self.assertEqual(data["name"], "Soumojit Das")
+        self.assertEqual(data["email"], "soumojit@enterprise.com")
+        self.assertEqual(data["picture"], "https://lh3.googleusercontent.com/photo.jpg")
+
+    @patch("httpx.AsyncClient.post")
+    @patch("httpx.AsyncClient.get")
+    def test_google_oauth_display_name_fallback_when_name_missing_or_empty(self, mock_get, mock_post):
+        """Google user without a usable name safely falls back to 'Google User' without exposing sub as display name."""
+        for empty_name in [None, "", "   "]:
+            url_res = self.client.get("/api/v1/auth/google/url")
+            self.assertEqual(url_res.status_code, 200)
+            state = url_res.json()["state"]
+
+            mock_post.return_value = MagicMock(
+                status_code=200,
+                json=lambda: {"access_token": "mock_at", "refresh_token": "mock_rt"},
+            )
+            mock_get.return_value = MagicMock(
+                status_code=200,
+                json=lambda: {
+                    "sub": "999888777666",
+                    "name": empty_name,
+                    "email": "noname@enterprise.com",
+                    "email_verified": True,
+                },
+            )
+
+            res = self.client.post(
+                "/api/v1/auth/google/callback",
+                json={"code": "valid_code", "state": state},
+            )
+            self.assertEqual(res.status_code, 200)
+            data = res.json()
+            self.assertEqual(data["user_id"], "google_999888777666")
+            self.assertEqual(data["name"], "Google User")
+            self.assertNotEqual(data["name"], data["user_id"])
+
+            status_res = self.client.get("/api/v1/auth/status")
+            self.assertEqual(status_res.status_code, 200)
+            status_data = status_res.json()
+            self.assertEqual(status_data["user_id"], "google_999888777666")
+            self.assertEqual(status_data["name"], "Google User")
+
 
 if __name__ == "__main__":
     unittest.main()
